@@ -70,7 +70,14 @@ Agents trust `certs/ca.crt` (path in `AGENT_CA_CERT`, defaults to `certs/ca.crt`
 These are *development* certificates. Production uses the company CA / cert-manager (Step 8).
 Gotcha: if the environment variable `REQUESTS_CA_BUNDLE` is set (common on company laptops), the Python `requests` library uses it instead of the agent's CA file.
 
-Next: 5c secrets handling, 5d retention, 5e backups.
+**5c. Secrets handling (done).**
+- `docker-compose.yml` has **no fallback passwords**: it refuses to start if a secret is missing from `.env`.
+- `python scripts/secrets_tool.py check` audits `.env` (placeholders, well-known defaults, too short, reused values). Exit code 1 = weak.
+- `python scripts/secrets_tool.py generate` writes `.env.generated` with strong random secrets (never overwrites `.env`). After renaming it to `.env`, run `docker compose down -v` then `docker compose up -d`, because database passwords are baked into the data volumes (this deletes stored traces).
+- Tests fail the build if a private key, API token or weak compose default is committed.
+- Real deployments: secrets come from a secret manager (OpenBao/Kubernetes secrets, Step 8), not a file.
+
+Next: 5d retention, 5e backups.
 
 ## Tests (Step 4)
 Automated tests start a real collector with `collector/config.yaml` (on ports 14xxx, so they never clash with your running stack) and a fake Langfuse that records what the collector exports.
@@ -84,6 +91,7 @@ python -m pytest                                                  # needs Docker
 |---|---|
 | Redaction (21 tests) | 15 kinds of sensitive text are masked; nested JSON, error messages, stack traces and resource attributes are covered; secret-named fields are dropped; normal text is untouched; oversized values are cut |
 | Security (12 tests) | agents without/with a wrong API key get 401 and nothing is stored; health probes stay open; plain HTTP and untrusted certificates are refused; spans arrive over TLS |
+| Secrets (12 tests) | placeholders/defaults/short/reused secrets are detected; generated secrets are strong and unique; compose has no weak fallbacks and refuses to start without secrets; no keys/tokens are committed |
 | Pipeline (5 tests) | traces keep their parent/child structure; gateway adds environment labels; garbage input is rejected without crashing; spans survive a backend outage (retry); the collector works after a restart |
 
 GitHub runs the same tests on every push (`.github/workflows/ci.yml`).
