@@ -1,6 +1,6 @@
 # OpenTelemetry Collector gateway - Step 1
-# Receives OTLP from agents, adds standard metadata, batches, retries, forwards to Langfuse.
-# Step 2 adds PII redaction, allow/deny rules and payload limits here.
+# Receives OTLP from agents, REDACTS sensitive data, adds standard metadata, batches, retries,
+# forwards to Langfuse. Redaction happens here, BEFORE anything is stored.
 
 extensions:
   health_check:
@@ -24,6 +24,40 @@ processors:
     check_interval: 1s
     limit_percentage: 80
     spike_limit_percentage: 25
+
+  # ---- Step 3: privacy. Runs before anything is exported or stored. ----
+  transform/redact:
+    error_mode: ignore
+    trace_statements:
+      - context: span
+        statements:
+          # 1) Drop attributes whose NAME looks like a secret
+          - delete_matching_keys(attributes, "(?i).*(password|passwd|secret|token|authorization|api[_-]?key|cookie).*")
+          # 2) Mask sensitive VALUES inside every remaining string attribute
+          #    (order matters: longer/more specific patterns first)
+          - replace_all_patterns(attributes, "value", "(?i)bearer\\s+[A-Za-z0-9._~+/=-]{10,}", "[REDACTED_TOKEN]")
+          - replace_all_patterns(attributes, "value", "(?i)\\b(?:sk|pk|hf|ghp|xox[abp])[-_][A-Za-z0-9_-]{16,}", "[REDACTED_KEY]")
+          - replace_all_patterns(attributes, "value", "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]")
+          - replace_all_patterns(attributes, "value", "\\b(?:\\d[ -]?){13,19}\\b", "[REDACTED_CARD]")
+          - replace_all_patterns(attributes, "value", "\\b\\d{3}-\\d{2}-\\d{4}\\b", "[REDACTED_SSN]")
+          - replace_all_patterns(attributes, "value", "\\b\\d{4}\\s\\d{4}\\s\\d{4}\\b", "[REDACTED_ID]")
+          - replace_all_patterns(attributes, "value", "(?i)\\bMRN[:#\\s-]*\\d{5,}\\b", "[REDACTED_MRN]")
+          - replace_all_patterns(attributes, "value", "(?:\\+?91[\\s-]?)?\\b[6-9]\\d{4}[\\s-]?\\d{5}\\b", "[REDACTED_PHONE]")
+          - replace_all_patterns(attributes, "value", "(?:\\+?1[\\s.-]?)?\\(?\\b\\d{3}\\)?[\\s.-]\\d{3}[\\s.-]\\d{4}\\b", "[REDACTED_PHONE]")
+          # 3) Same masking for the error text Langfuse shows
+          - replace_pattern(status.message, "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]")
+          - replace_pattern(status.message, "\\b(?:\\d[ -]?){13,19}\\b", "[REDACTED_CARD]")
+          # 4) Payload size limit: cut any attribute value longer than 8000 characters
+          - truncate_all(attributes, 8000)
+      - context: spanevent
+        statements:
+          # Exceptions are recorded as span events (message + stack trace)
+          - delete_matching_keys(attributes, "(?i).*(password|passwd|secret|token|authorization|api[_-]?key|cookie).*")
+          - replace_all_patterns(attributes, "value", "(?i)bearer\\s+[A-Za-z0-9._~+/=-]{10,}", "[REDACTED_TOKEN]")
+          - replace_all_patterns(attributes, "value", "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]")
+          - replace_all_patterns(attributes, "value", "\\b(?:\\d[ -]?){13,19}\\b", "[REDACTED_CARD]")
+          - replace_all_patterns(attributes, "value", "\\b\\d{3}-\\d{2}-\\d{4}\\b", "[REDACTED_SSN]")
+          - truncate_all(attributes, 8000)
 
   # Enrich every span with approved platform metadata
   resource/enrich:
@@ -64,7 +98,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, resource/enrich, batch]
+      processors: [memory_limiter, transform/redact, resource/enrich, batch]
       exporters: [otlp_http/langfuse, debug]
   telemetry:
     logs:
