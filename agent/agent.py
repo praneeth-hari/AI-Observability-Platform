@@ -51,7 +51,9 @@ def load_dotenv(path):
 # The project's .env sits one folder above this file
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 
-COLLECTOR = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
+COLLECTOR = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://localhost:4318")
+# CA certificate the agent trusts for the collector's TLS (created by scripts/make_certs.py)
+CA_CERT = os.getenv("AGENT_CA_CERT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "certs", "ca.crt"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
 AGENT_API_KEY = os.getenv("AGENT_API_KEY", "")   # must match the collector's key
@@ -80,6 +82,7 @@ def setup_tracer():
         BatchSpanProcessor(OTLPSpanExporter(
             endpoint=f"{COLLECTOR}/v1/traces",
             headers={"Authorization": f"Bearer {AGENT_API_KEY}"},
+            certificate_file=CA_CERT if COLLECTOR.startswith("https://") else None,
         ))
     )
     trace.set_tracer_provider(provider)

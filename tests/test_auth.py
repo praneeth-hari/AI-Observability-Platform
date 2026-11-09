@@ -9,7 +9,7 @@ from conftest import AGENT_KEY
 def _post_empty_trace(collector, headers):
     from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
     return requests.post(f"{collector.http_url}/v1/traces", data=ExportTraceServiceRequest().SerializeToString(),
-                         headers={"Content-Type": "application/x-protobuf", **headers}, timeout=10)
+                         headers={"Content-Type": "application/x-protobuf", **headers}, timeout=10, verify=collector.ca)
 
 
 def test_missing_key_is_rejected(collector):

@@ -47,6 +47,7 @@ services:
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./collector/config.yaml:/etc/otelcol/config.yaml:ro
+      - ./certs:/certs:ro   # created by: python scripts/make_certs.py
     environment:
       LANGFUSE_OTLP_ENDPOINT: http://langfuse-web:3000/api/public/otel
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY}

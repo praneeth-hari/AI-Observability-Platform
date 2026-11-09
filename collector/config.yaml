@@ -19,10 +19,18 @@ receivers:
     protocols:
       grpc:
         endpoint: 0.0.0.0:4317
+        tls:
+          cert_file: /certs/server.crt
+          key_file: /certs/server.key
+          min_version: "1.2"
         auth:
           authenticator: bearertokenauth/agents
       http:
         endpoint: 0.0.0.0:4318
+        tls:
+          cert_file: /certs/server.crt
+          key_file: /certs/server.key
+          min_version: "1.2"
         auth:
           authenticator: bearertokenauth/agents
 

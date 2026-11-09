@@ -59,7 +59,18 @@ In Langfuse the input should read `My email is [REDACTED_EMAIL], phone [REDACTED
 **5a. Agent authentication (done).** The collector only accepts telemetry that carries `Authorization: Bearer <AGENT_API_KEY>`.
 Set `AGENT_API_KEY` in `.env` (long random value). `agent.py` reads it from `.env` automatically. A missing or wrong key gets `401`, and nothing is stored.
 The `:13133` health endpoint stays open so Kubernetes/monitoring probes work.
-Next: 5b TLS, 5c secrets handling, 5d retention, 5e backups.
+
+**5b. TLS encryption (done).** The collector only accepts HTTPS/TLS 1.2+ on ports 4317/4318, so the API key and traces are never sent in clear text.
+```bash
+pip install cryptography
+python scripts/make_certs.py          # creates certs/ (git-ignored): ca.crt, server.crt, server.key, ca.key
+docker compose up -d --force-recreate otel-collector
+```
+Agents trust `certs/ca.crt` (path in `AGENT_CA_CERT`, defaults to `certs/ca.crt`) and use `https://localhost:4318`.
+These are *development* certificates. Production uses the company CA / cert-manager (Step 8).
+Gotcha: if the environment variable `REQUESTS_CA_BUNDLE` is set (common on company laptops), the Python `requests` library uses it instead of the agent's CA file.
+
+Next: 5c secrets handling, 5d retention, 5e backups.
 
 ## Tests (Step 4)
 Automated tests start a real collector with `collector/config.yaml` (on ports 14xxx, so they never clash with your running stack) and a fake Langfuse that records what the collector exports.
@@ -72,6 +83,7 @@ python -m pytest                                                  # needs Docker
 | Group | What it proves |
 |---|---|
 | Redaction (21 tests) | 15 kinds of sensitive text are masked; nested JSON, error messages, stack traces and resource attributes are covered; secret-named fields are dropped; normal text is untouched; oversized values are cut |
+| Security (12 tests) | agents without/with a wrong API key get 401 and nothing is stored; health probes stay open; plain HTTP and untrusted certificates are refused; spans arrive over TLS |
 | Pipeline (5 tests) | traces keep their parent/child structure; gateway adds environment labels; garbage input is rejected without crashing; spans survive a backend outage (retry); the collector works after a restart |
 
 GitHub runs the same tests on every push (`.github/workflows/ci.yml`).

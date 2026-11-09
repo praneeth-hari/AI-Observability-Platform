@@ -18,6 +18,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import sys
+
 import pytest
 import requests
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -27,6 +29,8 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+from make_certs import make_certs  # noqa: E402
 CONFIG = ROOT / "collector" / "config.yaml"
 IMAGE = "otel/opentelemetry-collector-contrib:0.165.0"
 
@@ -114,6 +118,11 @@ class Collector:
     def __init__(self, tmpdir):
         self.mode = "binary" if os.getenv("OTELCOL_BIN") else "docker"
         text = CONFIG.read_text(encoding="utf-8")
+        self.certdir = make_certs(Path(tmpdir) / "certs")
+        self.ca = str(self.certdir / "ca.crt")
+        # config refers to /certs/...; docker mounts the folder there, the binary needs the real path
+        if self.mode == "binary":
+            text = text.replace("/certs/", f"{self.certdir.as_posix()}/")
         for old, new in [("0.0.0.0:4317", f"0.0.0.0:{GRPC_PORT}"), ("0.0.0.0:4318", f"0.0.0.0:{HTTP_PORT}"),
                          ("0.0.0.0:13133", f"0.0.0.0:{HEALTH_PORT}"), ("port: 8888", f"port: {METRICS_PORT}")]:
             assert old in text, f"expected '{old}' in collector/config.yaml"
@@ -127,7 +136,7 @@ class Collector:
         self.proc = None
         self.name = "aiobs-test-collector"
 
-    http_url = f"http://127.0.0.1:{HTTP_PORT}"
+    http_url = f"https://localhost:{HTTP_PORT}"
     health_url = f"http://127.0.0.1:{HEALTH_PORT}/"
 
     def start(self):
@@ -141,7 +150,8 @@ class Collector:
                    "--add-host", "host.docker.internal:host-gateway",
                    "-p", f"{GRPC_PORT}:{GRPC_PORT}", "-p", f"{HTTP_PORT}:{HTTP_PORT}",
                    "-p", f"{HEALTH_PORT}:{HEALTH_PORT}",
-                   "--mount", f"type=bind,source={self.config},target=/etc/otelcol/config.yaml,readonly"]
+                   "--mount", f"type=bind,source={self.config},target=/etc/otelcol/config.yaml,readonly",
+                   "--mount", f"type=bind,source={self.certdir},target=/certs,readonly"]
             for k, v in self.env.items():
                 cmd += ["-e", f"{k}={v}"]
             cmd += [IMAGE, "--config=/etc/otelcol/config.yaml"]
@@ -197,6 +207,15 @@ def collector(backend):
     shutil.rmtree(tmp, ignore_errors=True)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _ignore_global_ca_bundles():
+    """Company laptops often set REQUESTS_CA_BUNDLE; the requests library then ignores the
+    exporter's own certificate_file. Tests must trust only the test CA."""
+    saved = {k: os.environ.pop(k) for k in ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE") if k in os.environ}
+    yield
+    os.environ.update(saved)
+
+
 @pytest.fixture(autouse=True)
 def _clean(backend):
     backend.reset()
@@ -210,6 +229,7 @@ def send(collector):
         provider = TracerProvider(resource=Resource.create({"service.name": "pytest-agent", **(resource_attrs or {})}))
         provider.add_span_processor(SimpleSpanProcessor(
             OTLPSpanExporter(endpoint=f"{collector.http_url}/v1/traces", timeout=10,
+                             certificate_file=collector.ca,
                              headers={"Authorization": f"Bearer {key}"} if key else {})))
         fn(provider.get_tracer("tests"))
         provider.shutdown()
