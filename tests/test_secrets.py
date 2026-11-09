@@ -109,5 +109,5 @@ def test_no_real_secrets_in_tracked_files():
 
 def test_gitignore_protects_secret_files():
     ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").split()
-    for must in (".env", "certs/", ".venv/"):
+    for must in (".env", "certs/", ".venv/", "backups/"):
         assert must in ignored, f"{must} must be git-ignored"

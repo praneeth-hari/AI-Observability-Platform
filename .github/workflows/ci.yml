@@ -28,6 +28,12 @@ jobs:
       - name: Install test dependencies
         run: pip install -r tests/requirements.txt
 
+      - name: Embedded ClickHouse for retention behaviour tests (optional)
+        run: pip install chdb || echo "chdb unavailable - behavioural retention tests will be skipped"
+
+      - name: Install an embedded ClickHouse (lets retention tests run against a real engine)
+        run: pip install chdb
+
       - name: Pull the collector image
         run: docker pull otel/opentelemetry-collector-contrib:0.165.0
 

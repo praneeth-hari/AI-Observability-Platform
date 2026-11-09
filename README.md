@@ -77,7 +77,20 @@ Gotcha: if the environment variable `REQUESTS_CA_BUNDLE` is set (common on compa
 - Tests fail the build if a private key, API token or weak compose default is committed.
 - Real deployments: secrets come from a secret manager (OpenBao/Kubernetes secrets, Step 8), not a file.
 
-Next: 5d retention, 5e backups.
+**5d. Retention (done).** `python scripts/retention.py plan --days 30` shows the rules; `apply` sets them on the running stack; `status` shows what is active; `remove` keeps data forever again. Default days: `RETENTION_DAYS` in `.env` (30).
+ClickHouse deletes traces/observations/scores older than N days row by row (exact, not rounded to months); MinIO lifecycle rules expire the raw event JSON and media. Tested against Langfuse's real ClickHouse schema.
+
+**5e. Backup and restore (done).**
+```bash
+python scripts/backup.py backup --keep 7      # ~1 minute downtime; writes backups/<timestamp>/ with checksums
+python scripts/backup.py list
+python scripts/backup.py verify backups/<timestamp>
+python scripts/backup.py restore backups/<timestamp> --yes    # REPLACES current data
+```
+Backups hold your data (possibly sensitive text): store them encrypted and off this machine. `backups/` is git-ignored.
+Schedule: Windows Task Scheduler / cron running `python scripts/backup.py backup --keep 7` nightly.
+
+Step 5 complete. Next: Step 6 (Kubernetes + Helm).
 
 ## Tests (Step 4)
 Automated tests start a real collector with `collector/config.yaml` (on ports 14xxx, so they never clash with your running stack) and a fake Langfuse that records what the collector exports.
@@ -92,6 +105,10 @@ python -m pytest                                                  # needs Docker
 | Redaction (21 tests) | 15 kinds of sensitive text are masked; nested JSON, error messages, stack traces and resource attributes are covered; secret-named fields are dropped; normal text is untouched; oversized values are cut |
 | Security (12 tests) | agents without/with a wrong API key get 401 and nothing is stored; health probes stay open; plain HTTP and untrusted certificates are refused; spans arrive over TLS |
 | Secrets (12 tests) | placeholders/defaults/short/reused secrets are detected; generated secrets are strong and unique; compose has no weak fallbacks and refuses to start without secrets; no keys/tokens are committed |
+| Retention (14 tests) | deletion rules cover all 6 trace tables, reject bad input, delete old rows and keep recent ones on a real ClickHouse engine, exact to the day |
+| Backup (11 tests) | correct command order, services always restarted, damaged backups detected, restore refuses without `--yes` or from a damaged backup, old backups pruned safely |
+| Retention (15 tests) | TTL SQL targets the right tables/columns, rejects bad input, and **really deletes old rows in an embedded ClickHouse** (needs `pip install chdb`, otherwise skipped) |
+| Backups (9 tests) | stack restarts even if archiving fails; partial backups are removed; corruption is detected; restore needs `--yes`, an intact backup and matching secrets; never uses `down -v` |
 | Pipeline (5 tests) | traces keep their parent/child structure; gateway adds environment labels; garbage input is rejected without crashing; spans survive a backend outage (retry); the collector works after a restart |
 
 GitHub runs the same tests on every push (`.github/workflows/ci.yml`).
