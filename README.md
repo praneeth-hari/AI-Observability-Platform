@@ -40,6 +40,37 @@ The script prints a **Trace ID**. In Langfuse go to **Tracing**, then search or 
 - [ ] Collector metrics: `curl -s localhost:8888/metrics | grep -E "accepted_spans|sent_spans|failed"`
 - [ ] Collector logs: `docker compose logs -f otel-collector`
 
+## Step 3 — PII redaction at the gateway
+The collector (`collector/config.yaml`, processor `transform/redact`) cleans every span **before** it is exported or stored:
+- drops attributes whose *name* looks like a secret (password, token, authorization, api key, cookie)
+- masks sensitive *values*: emails, phone numbers, card numbers, SSNs, Aadhaar-style IDs, MRNs, bearer tokens, API keys
+- also cleans exception messages, stack traces and span status messages
+- cuts any attribute value longer than 8000 characters
+
+Try it (all data is fake):
+```bash
+docker compose restart otel-collector
+python agent.py --pii --mock           # question contains fake email/phone/card/SSN/MRN
+python agent.py --pii --fail --mock    # the error message also contains fake PII
+```
+In Langfuse the input should read `My email is [REDACTED_EMAIL], phone [REDACTED_PHONE], card [REDACTED_CARD] ...`.
+
+## Tests (Step 4)
+Automated tests start a real collector with `collector/config.yaml` (on ports 14xxx, so they never clash with your running stack) and a fake Langfuse that records what the collector exports.
+
+```bash
+cd agent && python -m venv .venv && .venv\Scripts\activate      # once (Windows; use source .venv/bin/activate on Mac/Linux)
+cd .. && pip install -r tests/requirements.txt
+python -m pytest                                                  # needs Docker running; takes ~3 minutes
+```
+| Group | What it proves |
+|---|---|
+| Redaction (21 tests) | 15 kinds of sensitive text are masked; nested JSON, error messages, stack traces and resource attributes are covered; secret-named fields are dropped; normal text is untouched; oversized values are cut |
+| Pipeline (5 tests) | traces keep their parent/child structure; gateway adds environment labels; garbage input is rejected without crashing; spans survive a backend outage (retry); the collector works after a restart |
+
+GitHub runs the same tests on every push (`.github/workflows/ci.yml`).
+Known limit: spans waiting in the collector's in-memory queue are lost if the collector is killed mid-send (a persistent queue is planned for Step 5).
+
 ## Troubleshooting
 | Symptom | Check |
 |---|---|

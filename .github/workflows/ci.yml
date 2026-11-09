@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            agent/requirements.txt
+            tests/requirements.txt
+
+      - name: Validate docker-compose.yml
+        run: |
+          cp .env.example .env
+          docker compose config -q
+
+      - name: Install test dependencies
+        run: pip install -r tests/requirements.txt
+
+      - name: Pull the collector image
+        run: docker pull otel/opentelemetry-collector-contrib:0.165.0
+
+      - name: Run privacy + pipeline tests
+        run: python -m pytest

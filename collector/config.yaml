@@ -29,6 +29,14 @@ processors:
   transform/redact:
     error_mode: ignore
     trace_statements:
+      # Resource attributes (service metadata) can carry sensitive values too
+      - context: resource
+        statements:
+          - delete_matching_keys(attributes, "(?i).*(password|passwd|secret|token|authorization|api[_-]?key|cookie).*")
+          - replace_all_patterns(attributes, "value", "(?i)bearer\\s+[A-Za-z0-9._~+/=-]{10,}", "[REDACTED_TOKEN]")
+          - replace_all_patterns(attributes, "value", "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]")
+          - replace_all_patterns(attributes, "value", "\\b(?:\\d[ -]?){13,19}\\b", "[REDACTED_CARD]")
+          - replace_all_patterns(attributes, "value", "\\b\\d{3}-\\d{2}-\\d{4}\\b", "[REDACTED_SSN]")
       - context: span
         statements:
           # 1) Drop attributes whose NAME looks like a secret
