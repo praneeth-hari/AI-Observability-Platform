@@ -1,0 +1,78 @@
+# OpenTelemetry Collector gateway - Step 1
+# Receives OTLP from agents, adds standard metadata, batches, retries, forwards to Langfuse.
+# Step 2 adds PII redaction, allow/deny rules and payload limits here.
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  basicauth/langfuse:
+    client_auth:
+      username: ${env:LANGFUSE_PUBLIC_KEY}
+      password: ${env:LANGFUSE_SECRET_KEY}
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Protect the gateway from running out of memory under load
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  # Enrich every span with approved platform metadata
+  resource/enrich:
+    attributes:
+      - key: deployment.environment
+        value: ${env:DEPLOYMENT_ENV}
+        action: upsert
+      - key: telemetry.gateway
+        value: ai-obs-collector
+        action: upsert
+
+  batch:
+    send_batch_size: 512
+    timeout: 5s
+
+exporters:
+  # Langfuse accepts OTLP over HTTP/protobuf at /api/public/otel (the exporter appends /v1/traces)
+  otlp_http/langfuse:
+    endpoint: ${env:LANGFUSE_OTLP_ENDPOINT}
+    auth:
+      authenticator: basicauth/langfuse
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+
+  # Prints a one-line summary per batch to the collector logs (useful for debugging ingestion)
+  debug:
+    verbosity: basic
+
+service:
+  extensions: [health_check, basicauth/langfuse]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/enrich, batch]
+      exporters: [otlp_http/langfuse, debug]
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888

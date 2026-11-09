@@ -1,0 +1,167 @@
+# Enterprise AI Observability - Step 1 (local prototype)
+# Flow: agent --OTLP--> otel-collector (gateway) --OTLP/HTTP--> Langfuse (Postgres + ClickHouse + Redis + MinIO)
+# Langfuse services are trimmed from the official self-host compose:
+# https://github.com/langfuse/langfuse/blob/main/docker-compose.yml
+
+x-langfuse-env: &langfuse-env
+  NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+  DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres
+  SALT: ${SALT}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+  TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-false}
+  CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+  CLICKHOUSE_URL: http://clickhouse:8123
+  CLICKHOUSE_USER: clickhouse
+  CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse}
+  CLICKHOUSE_CLUSTER_ENABLED: "false"
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-miniosecret}
+  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+  LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-miniosecret}
+  LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_AUTH: ${REDIS_AUTH:-myredissecret}
+  REDIS_TLS_ENABLED: "false"
+
+x-langfuse-depends: &langfuse-depends
+  postgres: { condition: service_healthy }
+  clickhouse: { condition: service_healthy }
+  redis: { condition: service_healthy }
+  minio: { condition: service_healthy }
+
+services:
+  # ---------- Collector gateway (layer 2) ----------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.165.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./collector/config.yaml:/etc/otelcol/config.yaml:ro
+    environment:
+      LANGFUSE_OTLP_ENDPOINT: http://langfuse-web:3000/api/public/otel
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY}
+      DEPLOYMENT_ENV: ${DEPLOYMENT_ENV:-local}
+    ports:
+      - "4317:4317"            # OTLP gRPC  (agents send here)
+      - "4318:4318"            # OTLP HTTP  (agents send here)
+      - "127.0.0.1:13133:13133" # health check
+      - "127.0.0.1:8888:8888"   # collector's own Prometheus metrics
+    depends_on:
+      - langfuse-web
+
+  # ---------- Trace UI + API (layer 4) ----------
+  langfuse-web:
+    image: docker.langfuse.com/langfuse/langfuse:${LANGFUSE_IMAGE_TAG:-4}
+    restart: unless-stopped
+    depends_on: *langfuse-depends
+    ports:
+      - "3000:3000"
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:9090
+      LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: http://minio:9000
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD}
+
+  langfuse-worker:
+    image: docker.langfuse.com/langfuse/langfuse-worker:${LANGFUSE_IMAGE_TAG:-4}
+    restart: unless-stopped
+    depends_on: *langfuse-depends
+    ports:
+      - "127.0.0.1:3030:3030"
+    environment:
+      <<: *langfuse-env
+
+  # ---------- Storage (layer 3) ----------
+  postgres:
+    image: docker.io/postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+      TZ: UTC
+      PGTZ: UTC
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:26.3.62.3
+    restart: unless-stopped
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse}
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+
+  redis:
+    image: docker.io/redis:7
+    restart: unless-stopped
+    command: --requirepass ${REDIS_AUTH:-myredissecret} --maxmemory-policy noeviction
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+    volumes:
+      - redis_data:/data
+
+  minio:
+    image: cgr.dev/chainguard/minio
+    restart: unless-stopped
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniosecret}
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+    ports:
+      - "9090:9000"
+      - "127.0.0.1:9091:9001"
+    volumes:
+      - minio_data:/data
+
+volumes:
+  postgres_data:
+  clickhouse_data:
+  clickhouse_logs:
+  redis_data:
+  minio_data:
