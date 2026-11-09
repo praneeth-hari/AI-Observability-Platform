@@ -5,6 +5,10 @@
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
+  # Step 5: agents must send "Authorization: Bearer <AGENT_API_KEY>" with every export.
+  # (Later: one key per team via the "tokens" list, so a leaked key can be rotated alone.)
+  bearertokenauth/agents:
+    token: ${env:AGENT_API_KEY}
   basicauth/langfuse:
     client_auth:
       username: ${env:LANGFUSE_PUBLIC_KEY}
@@ -15,8 +19,12 @@ receivers:
     protocols:
       grpc:
         endpoint: 0.0.0.0:4317
+        auth:
+          authenticator: bearertokenauth/agents
       http:
         endpoint: 0.0.0.0:4318
+        auth:
+          authenticator: bearertokenauth/agents
 
 processors:
   # Protect the gateway from running out of memory under load
@@ -102,7 +110,7 @@ exporters:
     verbosity: basic
 
 service:
-  extensions: [health_check, basicauth/langfuse]
+  extensions: [health_check, basicauth/langfuse, bearertokenauth/agents]
   pipelines:
     traces:
       receivers: [otlp]

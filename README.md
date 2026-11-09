@@ -55,6 +55,12 @@ python agent.py --pii --fail --mock    # the error message also contains fake PI
 ```
 In Langfuse the input should read `My email is [REDACTED_EMAIL], phone [REDACTED_PHONE], card [REDACTED_CARD] ...`.
 
+## Step 5 — Security (in progress)
+**5a. Agent authentication (done).** The collector only accepts telemetry that carries `Authorization: Bearer <AGENT_API_KEY>`.
+Set `AGENT_API_KEY` in `.env` (long random value). `agent.py` reads it from `.env` automatically. A missing or wrong key gets `401`, and nothing is stored.
+The `:13133` health endpoint stays open so Kubernetes/monitoring probes work.
+Next: 5b TLS, 5c secrets handling, 5d retention, 5e backups.
+
 ## Tests (Step 4)
 Automated tests start a real collector with `collector/config.yaml` (on ports 14xxx, so they never clash with your running stack) and a fake Langfuse that records what the collector exports.
 

@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "collector" / "config.yaml"
 IMAGE = "otel/opentelemetry-collector-contrib:0.165.0"
 
+AGENT_KEY = "test-agent-key-0123456789"
 GRPC_PORT, HTTP_PORT, HEALTH_PORT, METRICS_PORT, BACKEND_PORT = 14317, 14318, 14133, 14888, 14999
 
 
@@ -122,7 +123,7 @@ class Collector:
         host = "127.0.0.1" if self.mode == "binary" else "host.docker.internal"
         self.env = {"LANGFUSE_OTLP_ENDPOINT": f"http://{host}:{BACKEND_PORT}/api/public/otel",
                     "LANGFUSE_PUBLIC_KEY": "pk-test", "LANGFUSE_SECRET_KEY": "sk-test",
-                    "DEPLOYMENT_ENV": "test"}
+                    "DEPLOYMENT_ENV": "test", "AGENT_API_KEY": AGENT_KEY}
         self.proc = None
         self.name = "aiobs-test-collector"
 
@@ -204,11 +205,12 @@ def _clean(backend):
 
 @pytest.fixture
 def send(collector):
-    """send(fn, resource_attrs=None): run fn(tracer) and export its spans to the collector."""
-    def _send(fn, resource_attrs=None):
+    """send(fn, resource_attrs=None, key=AGENT_KEY): run fn(tracer) and export its spans to the collector."""
+    def _send(fn, resource_attrs=None, key=AGENT_KEY):
         provider = TracerProvider(resource=Resource.create({"service.name": "pytest-agent", **(resource_attrs or {})}))
         provider.add_span_processor(SimpleSpanProcessor(
-            OTLPSpanExporter(endpoint=f"{collector.http_url}/v1/traces", timeout=10)))
+            OTLPSpanExporter(endpoint=f"{collector.http_url}/v1/traces", timeout=10,
+                             headers={"Authorization": f"Bearer {key}"} if key else {})))
         fn(provider.get_tracer("tests"))
         provider.shutdown()
     return _send

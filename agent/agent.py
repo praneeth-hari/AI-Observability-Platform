@@ -54,6 +54,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env
 COLLECTOR = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
+AGENT_API_KEY = os.getenv("AGENT_API_KEY", "")   # must match the collector's key
 HF_TOKEN = os.getenv("HF_TOKEN", "")
 HF_MODEL = os.getenv("HF_MODEL", "Qwen/Qwen2.5-7B-Instruct")
 HF_URL = os.getenv("HF_URL", "https://router.huggingface.co/v1/chat/completions")
@@ -76,7 +77,10 @@ def setup_tracer():
     })
     provider = TracerProvider(resource=resource)
     provider.add_span_processor(
-        BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{COLLECTOR}/v1/traces"))
+        BatchSpanProcessor(OTLPSpanExporter(
+            endpoint=f"{COLLECTOR}/v1/traces",
+            headers={"Authorization": f"Bearer {AGENT_API_KEY}"},
+        ))
     )
     trace.set_tracer_provider(provider)
     return provider, trace.get_tracer("ai-obs.sample-agent")
@@ -236,6 +240,8 @@ if __name__ == "__main__":
         backend = "ollama"
     else:
         backend = "mock"
+    if not AGENT_API_KEY:
+        print("WARNING: AGENT_API_KEY is not set (.env) - the collector will reject this agent's traces.")
     print(f"LLM backend: {backend}" + (f" ({HF_MODEL})" if backend == "hf" else ""))
 
     provider, tracer = setup_tracer()

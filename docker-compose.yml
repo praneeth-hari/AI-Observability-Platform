@@ -52,6 +52,7 @@ services:
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY}
       DEPLOYMENT_ENV: ${DEPLOYMENT_ENV:-local}
+      AGENT_API_KEY: ${AGENT_API_KEY:?Set AGENT_API_KEY in .env (see .env.example)}
     ports:
       - "4317:4317"            # OTLP gRPC  (agents send here)
       - "4318:4318"            # OTLP HTTP  (agents send here)

@@ -1,6 +1,10 @@
 """Pipeline tests: trace completeness, enrichment, malformed input, outage retry, restart."""
 import requests
 
+from conftest import AGENT_KEY
+
+AUTH = {"Authorization": f"Bearer {AGENT_KEY}"}
+
 
 def test_trace_is_complete_and_correlated(send, backend):
     def fn(tracer):
@@ -33,10 +37,10 @@ def test_spans_are_enriched_by_gateway(send, backend):
 
 def test_malformed_payload_is_rejected_and_collector_survives(collector, send, backend):
     r = requests.post(f"{collector.http_url}/v1/traces", data=b"this is not protobuf",
-                      headers={"Content-Type": "application/x-protobuf"}, timeout=10)
+                      headers={"Content-Type": "application/x-protobuf", **AUTH}, timeout=10)
     assert 400 <= r.status_code < 500, f"expected a 4xx rejection, got {r.status_code}"
     r = requests.post(f"{collector.http_url}/v1/traces", data=b"{not json",
-                      headers={"Content-Type": "application/json"}, timeout=10)
+                      headers={"Content-Type": "application/json", **AUTH}, timeout=10)
     assert 400 <= r.status_code < 500
     assert collector.healthy()
     send(lambda t: t.start_span("after-garbage").end())
