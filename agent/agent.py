@@ -142,8 +142,37 @@ def call_llm(tracer, name, messages, backend):
         return text
 
 
+def mock_graph_planner(last):
+    """Scripted planner for langgraph_agent.py: uses each tool the question needs, then finishes."""
+    question = last.split("Question:", 1)[-1].split("\nTool results so far:")[0].strip()
+    used = set(re.findall(r"^- (\w+)\(", last.split("Tool results so far:", 1)[-1], re.M))
+    q = question.lower()
+    needed = []
+    if re.search(r"\btime\b|\bdate\b|\bclock\b|\btoday\b", q):
+        needed.append(("clock", ""))
+    for topic in ("refund policy", "working hours", "gst rate", "data retention", "escalation"):
+        if all(w in q for w in topic.split()[:1]):
+            needed.append(("lookup", topic))
+            break
+    expr = re.findall(r"\d+(?:\.\d+)?\s*%\s*of\s*[\d.]+", question) or \
+        re.findall(r"\(?\d+(?:\.\d+)?\s*[*/+-]\s*\d+(?:\.\d+)?\)?", question)
+    if expr:
+        needed.append(("calculator", expr[0]))
+    for tool, tool_input in needed:
+        if tool not in used:
+            return json.dumps({"action": "tool", "tool": tool, "input": tool_input})
+    return json.dumps({"action": "final"})
+
+
 def mock_reply(messages):
     last = messages[-1]["content"]
+    if "GRAPH_PLANNER" in messages[0]["content"]:
+        return mock_graph_planner(last)
+    if "Tool results:" in last and "Question:" in last and "Tool result:" not in last:
+        results = last.split("Tool results:", 1)[-1].strip()
+        if "ERROR" in results:
+            return "I could not complete that: a tool failed."
+        return "Based on the tools: " + "; ".join(l.split("->", 1)[-1].strip().rstrip(".") for l in results.splitlines()) + "."
     if "Respond ONLY with JSON" in messages[0]["content"]:
         expr = re.findall(r"\d+(?:\.\d+)?\s*%\s*of\s*[\d.]+", last) or \
                re.findall(r"\d+(?:\.\d+)?\s*[*/+-]\s*\d+(?:\.\d+)?", last)
