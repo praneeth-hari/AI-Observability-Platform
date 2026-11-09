@@ -142,7 +142,8 @@ def format_observations(obs: List[Dict[str, str]]) -> str:
 
 
 def _json_objects(text: str):
-    """Yield every JSON object found in the text, in order."""
+    """Yield every JSON object found in the text, in order. Small models often add chatter,
+    ``` fences, or write several objects in one reply; a greedy regex cannot handle that."""
     decoder, i = json.JSONDecoder(), 0
     while True:
         i = text.find("{", i)
@@ -159,11 +160,12 @@ def _json_objects(text: str):
 
 
 def parse_decision(text: str) -> Dict[str, Any]:
-    """Turn the model's reply into ONE decision. Takes the first valid tool request."""
+    """Turn the model's reply into ONE decision. Takes the first valid tool request (the loop
+    comes back for the others). Anything we cannot trust becomes 'final'."""
     saw_final = False
     for data in _json_objects(text or ""):
         tool = data.get("tool")
-        if tool in TOOLS and data.get("action", "tool") == "tool":
+        if tool in TOOLS and data.get("action", "tool") == "tool":   # tolerate a missing "action"
             return {"action": "tool", "tool": tool, "input": str(data.get("input", ""))}
         saw_final = saw_final or data.get("action") == "final"
     return {"action": "final", "reason": "model chose to answer" if saw_final else "no valid plan"}
