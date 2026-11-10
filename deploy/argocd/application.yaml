@@ -1,0 +1,32 @@
+# GitOps: Argo CD watches this repo and keeps the cluster identical to the Helm chart in Git.
+#   kubectl apply -f deploy/argocd/application.yaml
+# Change something in deploy/helm/... , push to main, and Argo CD rolls it out by itself.
+# Secrets are deliberately NOT in Git: ai-obs-secrets and ai-obs-collector-tls are created
+# separately (scripts/k8s_secrets.py today, a secrets vault in Step 8).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ai-observability
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/praneeth-hari/AI-Observability-Platform.git
+    targetRevision: main
+    path: deploy/helm/ai-observability
+    helm:
+      releaseName: ai-observability
+      valueFiles:
+        - values-kind.yaml          # laptop sizing; a real cluster would use its own values file
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ai-obs
+  syncPolicy:
+    automated:
+      prune: true                   # things deleted from Git are deleted from the cluster
+      selfHeal: true                # manual changes to the cluster are reverted to what Git says
+    syncOptions:
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff: {duration: 10s, factor: 2, maxDuration: 3m}

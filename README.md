@@ -127,6 +127,17 @@ Remove everything: `kind delete cluster --name ai-obs`, then `docker compose sta
 
 Known gaps (planned): MinIO image is unpinned (Chainguard publishes only `latest`; pin by digest later); databases are single-instance (managed Postgres/ClickHouse for production comes with the enterprise values in Step 8); TLS certificate is the dev CA (cert-manager in Step 8).
 
+## Step 7 — GitOps with Argo CD
+Argo CD watches this GitHub repo and keeps the cluster identical to the Helm chart (`deploy/argocd/application.yaml`). Push a chart change to `main` and it is rolled out automatically; manual changes to the cluster are reverted (`selfHeal`), and things removed from Git are removed from the cluster (`prune`). Deleting the Argo app never deletes your data (no cascade finalizer). Secrets stay out of Git (created by `scripts/k8s_secrets.py`; a vault in Step 8).
+```bash
+kubectl create namespace argocd
+kubectl apply -n argocd --server-side -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.6.1/manifests/install.yaml
+kubectl scale -n argocd deployment/argocd-dex-server deployment/argocd-notifications-controller --replicas=0   # save RAM on a laptop
+kubectl apply -f deploy/argocd/application.yaml
+kubectl port-forward -n argocd svc/argocd-server 8080:443          # UI: https://localhost:8080 (user: admin)
+kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath="{.data.password}"   # base64 of the admin password
+```
+
 ## Tests (Step 4)
 Automated tests start a real collector with `collector/config.yaml` (on ports 14xxx, so they never clash with your running stack) and a fake Langfuse that records what the collector exports.
 
@@ -163,6 +174,7 @@ docker-compose.yml        Langfuse stack + collector gateway
 collector/config.yaml     Collector pipeline (auth, TLS, redaction)
 deploy/helm/ai-observability/   Helm chart (Step 6)
 deploy/kind/kind-config.yaml    Local test cluster
+deploy/argocd/application.yaml  GitOps: Argo CD app that deploys the chart from GitHub
 scripts/k8s_secrets.py    .env + certs -> Kubernetes Secrets
 agent/agent.py            Step 1 scripted sample agent (Ollama or mock LLM)
 agent/langgraph_agent.py  Step 2 LangGraph agent with tools
