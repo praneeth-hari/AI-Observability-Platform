@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ai-observability
+description: Enterprise AI observability platform - OTLP collector gateway (auth, TLS, PII redaction) + Langfuse trace store
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

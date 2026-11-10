@@ -1,0 +1,30 @@
+# Small footprint for a laptop test cluster (kind). Use:  helm install ... -f values-kind.yaml
+collector:
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 384Mi}
+langfuse:
+  web:
+    nodeHeapMb: 1280
+    resources:
+      requests: {cpu: 100m, memory: 768Mi}
+      limits: {memory: 2Gi}
+  worker:
+    nodeHeapMb: 1024
+    resources:
+      requests: {cpu: 100m, memory: 512Mi}
+      limits: {memory: 1536Mi}
+postgres:
+  storage: 2Gi
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 512Mi}
+clickhouse:
+  storage: 4Gi
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {memory: 1536Mi}
+redis:
+  storage: 512Mi
+minio:
+  storage: 2Gi

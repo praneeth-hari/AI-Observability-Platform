@@ -1,0 +1,13 @@
+AI Observability platform installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Wait until every pod is Ready (the first start runs database migrations - allow a few minutes):
+  kubectl get pods -n {{ .Release.Namespace }} -w
+
+Open the trace UI (leave this running):
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "aiobs.fullname" . }}-langfuse-web 3000:3000
+
+Send traces from an agent (leave this running in another window):
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "aiobs.fullname" . }}-collector 4318:4318
+  # the agent then uses https://localhost:4318 exactly as with docker compose
+
+Secrets come from the Secret "{{ .Values.secrets.existingSecret }}"; TLS from "{{ .Values.collector.tls.secretName }}".

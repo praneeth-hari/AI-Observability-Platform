@@ -1,0 +1,7 @@
+# Small throwaway Kubernetes cluster that runs inside Docker (for testing the Helm chart).
+#   kind create cluster --name ai-obs --config deploy/kind/kind-config.yaml
+#   kind delete cluster --name ai-obs        # removes everything
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane

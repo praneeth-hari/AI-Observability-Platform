@@ -1,0 +1,138 @@
+# OpenTelemetry Collector gateway - Step 1
+# Receives OTLP from agents, REDACTS sensitive data, adds standard metadata, batches, retries,
+# forwards to Langfuse. Redaction happens here, BEFORE anything is stored.
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  # Step 5: agents must send "Authorization: Bearer <AGENT_API_KEY>" with every export.
+  # (Later: one key per team via the "tokens" list, so a leaked key can be rotated alone.)
+  bearertokenauth/agents:
+    token: ${env:AGENT_API_KEY}
+  basicauth/langfuse:
+    client_auth:
+      username: ${env:LANGFUSE_PUBLIC_KEY}
+      password: ${env:LANGFUSE_SECRET_KEY}
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        tls:
+          cert_file: /certs/server.crt
+          key_file: /certs/server.key
+          min_version: "1.2"
+        auth:
+          authenticator: bearertokenauth/agents
+      http:
+        endpoint: 0.0.0.0:4318
+        tls:
+          cert_file: /certs/server.crt
+          key_file: /certs/server.key
+          min_version: "1.2"
+        auth:
+          authenticator: bearertokenauth/agents
+
+processors:
+  # Protect the gateway from running out of memory under load
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  # ---- Step 3: privacy. Runs before anything is exported or stored. ----
+  transform/redact:
+    error_mode: ignore
+    trace_statements:
+      # Resource attributes (service metadata) can carry sensitive values too
+      - context: resource
+        statements:
+          - delete_matching_keys(attributes, "(?i).*(password|passwd|secret|authorization|api[_-]?key|cookie|token($|[^s])|(access|refresh|auth|api|bearer|session|id)[_.-]?tokens).*")
+          - replace_all_patterns(attributes, "value", "(?i)bearer\\s+[A-Za-z0-9._~+/=-]{10,}", "[REDACTED_TOKEN]")
+          - replace_all_patterns(attributes, "value", "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]")
+          - replace_all_patterns(attributes, "value", "\\b(?:\\d[ -]?){13,19}\\b", "[REDACTED_CARD]")
+          - replace_all_patterns(attributes, "value", "\\b\\d{3}-\\d{2}-\\d{4}\\b", "[REDACTED_SSN]")
+      - context: span
+        statements:
+          # 1) Drop attributes whose NAME looks like a secret.
+          #    NOTE: plain "tokens" (gen_ai.usage.input_tokens) are LLM usage COUNTS needed for cost
+          #    tracking, so they are kept; "token" / "access_token" / "auth_tokens" etc. are dropped.
+          - delete_matching_keys(attributes, "(?i).*(password|passwd|secret|authorization|api[_-]?key|cookie|token($|[^s])|(access|refresh|auth|api|bearer|session|id)[_.-]?tokens).*")
+          # 2) Mask sensitive VALUES inside every remaining string attribute
+          #    (order matters: longer/more specific patterns first)
+          - replace_all_patterns(attributes, "value", "(?i)bearer\\s+[A-Za-z0-9._~+/=-]{10,}", "[REDACTED_TOKEN]")
+          - replace_all_patterns(attributes, "value", "(?i)\\b(?:sk|pk|hf|ghp|xox[abp])[-_][A-Za-z0-9_-]{16,}", "[REDACTED_KEY]")
+          - replace_all_patterns(attributes, "value", "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]")
+          - replace_all_patterns(attributes, "value", "\\b(?:\\d[ -]?){13,19}\\b", "[REDACTED_CARD]")
+          - replace_all_patterns(attributes, "value", "\\b\\d{3}-\\d{2}-\\d{4}\\b", "[REDACTED_SSN]")
+          - replace_all_patterns(attributes, "value", "\\b\\d{4}\\s\\d{4}\\s\\d{4}\\b", "[REDACTED_ID]")
+          - replace_all_patterns(attributes, "value", "(?i)\\bMRN[:#\\s-]*\\d{5,}\\b", "[REDACTED_MRN]")
+          - replace_all_patterns(attributes, "value", "(?:\\+?91[\\s-]?)?\\b[6-9]\\d{4}[\\s-]?\\d{5}\\b", "[REDACTED_PHONE]")
+          - replace_all_patterns(attributes, "value", "(?:\\+?1[\\s.-]?)?\\(?\\b\\d{3}\\)?[\\s.-]\\d{3}[\\s.-]\\d{4}\\b", "[REDACTED_PHONE]")
+          # 3) Same masking for the error text Langfuse shows
+          - replace_pattern(status.message, "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]")
+          - replace_pattern(status.message, "\\b(?:\\d[ -]?){13,19}\\b", "[REDACTED_CARD]")
+          # 4) Payload size limit: cut any attribute value longer than 8000 characters
+          - truncate_all(attributes, 8000)
+      - context: spanevent
+        statements:
+          # Exceptions are recorded as span events (message + stack trace)
+          - delete_matching_keys(attributes, "(?i).*(password|passwd|secret|authorization|api[_-]?key|cookie|token($|[^s])|(access|refresh|auth|api|bearer|session|id)[_.-]?tokens).*")
+          - replace_all_patterns(attributes, "value", "(?i)bearer\\s+[A-Za-z0-9._~+/=-]{10,}", "[REDACTED_TOKEN]")
+          - replace_all_patterns(attributes, "value", "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]")
+          - replace_all_patterns(attributes, "value", "\\b(?:\\d[ -]?){13,19}\\b", "[REDACTED_CARD]")
+          - replace_all_patterns(attributes, "value", "\\b\\d{3}-\\d{2}-\\d{4}\\b", "[REDACTED_SSN]")
+          - truncate_all(attributes, 8000)
+
+  # Enrich every span with approved platform metadata
+  resource/enrich:
+    attributes:
+      - key: deployment.environment
+        value: ${env:DEPLOYMENT_ENV}
+        action: upsert
+      - key: telemetry.gateway
+        value: ai-obs-collector
+        action: upsert
+
+  batch:
+    send_batch_size: 512
+    timeout: 5s
+
+exporters:
+  # Langfuse accepts OTLP over HTTP/protobuf at /api/public/otel (the exporter appends /v1/traces)
+  otlp_http/langfuse:
+    endpoint: ${env:LANGFUSE_OTLP_ENDPOINT}
+    auth:
+      authenticator: basicauth/langfuse
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+
+  # Prints a one-line summary per batch to the collector logs (useful for debugging ingestion)
+  debug:
+    verbosity: basic
+
+service:
+  extensions: [health_check, basicauth/langfuse, bearertokenauth/agents]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/redact, resource/enrich, batch]
+      exporters: [otlp_http/langfuse, debug]
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888

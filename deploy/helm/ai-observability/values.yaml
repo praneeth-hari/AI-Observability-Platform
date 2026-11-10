@@ -1,0 +1,109 @@
+# Enterprise AI Observability platform - default values.
+# NO secrets live in this file. They come from a Kubernetes Secret (see secrets.existingSecret).
+
+nameOverride: ""
+fullnameOverride: ""
+
+secrets:
+  # Name of an existing Secret holding: NEXTAUTH_SECRET, SALT, ENCRYPTION_KEY, POSTGRES_PASSWORD,
+  # CLICKHOUSE_PASSWORD, REDIS_AUTH, MINIO_ROOT_PASSWORD, LANGFUSE_INIT_PROJECT_SECRET_KEY,
+  # LANGFUSE_INIT_USER_PASSWORD, AGENT_API_KEY.
+  # Create it with:  python scripts/k8s_secrets.py | kubectl apply -f -
+  # (Step 8 replaces this with a secrets vault; the chart does not care how the Secret is made.)
+  existingSecret: ai-obs-secrets
+
+collector:
+  image: otel/opentelemetry-collector-contrib:0.165.0
+  replicas: 1
+  deploymentEnv: local            # label added to every span (deployment.environment)
+  tls:
+    secretName: ai-obs-collector-tls   # Secret with server.crt + server.key (scripts/k8s_secrets.py)
+  service:
+    type: ClusterIP               # NodePort / LoadBalancer to reach it from outside the cluster
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 512Mi}
+
+langfuse:
+  imageTag: "4"
+  publicUrl: http://localhost:3000          # NEXTAUTH_URL: the address users open in the browser
+  mediaPublicEndpoint: http://localhost:9090  # browser-facing MinIO address (presigned media URLs)
+  telemetryEnabled: false
+  init:                                     # first-run bootstrap: org, project, API keys, admin login
+    orgId: obs-org
+    orgName: AI Observability
+    projectId: obs-prototype
+    projectName: Prototype
+    projectPublicKey: pk-lf-local-prototype
+    userEmail: admin@example.com
+    userName: Admin
+  # nodeHeapMb = Node.js's own heap limit. Node sizes it from the container limit (~50%), which is too
+  # small for Langfuse (it crashed with "JavaScript heap out of memory" at a 1Gi limit).
+  # Keep nodeHeapMb comfortably BELOW the memory limit (a test enforces this).
+  web:
+    replicas: 1
+    nodeHeapMb: 1280
+    resources:
+      requests: {cpu: 200m, memory: 1Gi}
+      limits: {memory: 2Gi}
+  worker:
+    replicas: 1
+    nodeHeapMb: 1024
+    resources:
+      requests: {cpu: 200m, memory: 768Mi}
+      limits: {memory: 1536Mi}
+  ingress:
+    enabled: false
+    className: ""
+    host: langfuse.example.com
+    annotations: {}
+    tls: []                                 # e.g. [{secretName: langfuse-tls, hosts: [langfuse.example.com]}]
+
+postgres:
+  image: docker.io/postgres:17
+  storage: 5Gi
+  storageClass: ""                          # "" = cluster default
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 768Mi}
+
+clickhouse:
+  image: docker.io/clickhouse/clickhouse-server:26.3.62.3
+  storage: 10Gi
+  storageClass: ""
+  resources:
+    requests: {cpu: 200m, memory: 768Mi}
+    limits: {memory: 2Gi}
+
+redis:
+  image: docker.io/redis:7
+  storage: 1Gi
+  storageClass: ""
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
+minio:
+  image: cgr.dev/chainguard/minio
+  storage: 5Gi
+  storageClass: ""
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 512Mi}
+
+# Data retention (same rules as scripts/retention.py): a nightly Job sets a ClickHouse TTL on each
+# trace table. Rows older than `days` are removed by ClickHouse in the background.
+retention:
+  enabled: true
+  days: 30
+  schedule: "17 3 * * *"
+  tables:                                   # table:time-column (taken from Langfuse's migrations)
+    - traces:timestamp
+    - observations:start_time
+    - scores:timestamp
+    - events_full:start_time
+    - events_core:start_time
+    - blob_storage_file_log:created_at
+
+networkPolicy:
+  enabled: true                             # only the pods that need to talk to each other can

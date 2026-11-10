@@ -1,3 +1,4 @@
 -r ../agent/requirements.txt
 pytest>=8
 cryptography>=42
+pyyaml>=6

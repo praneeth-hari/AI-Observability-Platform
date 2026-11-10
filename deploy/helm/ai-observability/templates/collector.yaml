@@ -1,0 +1,86 @@
+{{- $fn := include "aiobs.fullname" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fn }}-collector-config
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "collector") | nindent 4 }}
+data:
+  config.yaml: |
+{{ .Files.Get "files/collector-config.yaml" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fn }}-collector
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "collector") | nindent 4 }}
+spec:
+  replicas: {{ .Values.collector.replicas }}
+  selector:
+    matchLabels: {{- include "aiobs.selector" (dict "root" . "component" "collector") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "aiobs.labels" (dict "root" . "component" "collector") | nindent 8 }}
+      annotations:
+        # a config change restarts the collector
+        checksum/config: {{ .Files.Get "files/collector-config.yaml" | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: collector
+          image: {{ .Values.collector.image }}
+          args: ["--config=/etc/otelcol/config.yaml"]
+          ports:
+            - {name: otlp-grpc, containerPort: 4317}
+            - {name: otlp-http, containerPort: 4318}
+            - {name: health, containerPort: 13133}
+            - {name: metrics, containerPort: 8888}
+          env:
+            - name: LANGFUSE_OTLP_ENDPOINT
+              value: "http://{{ $fn }}-langfuse-web:3000/api/public/otel"
+            - name: LANGFUSE_PUBLIC_KEY
+              value: {{ .Values.langfuse.init.projectPublicKey | quote }}
+            {{- include "aiobs.secretEnv" (dict "root" . "name" "LANGFUSE_INIT_PROJECT_SECRET_KEY" "as" "LANGFUSE_SECRET_KEY") | nindent 12 }}
+            {{- include "aiobs.secretEnv" (dict "root" . "name" "AGENT_API_KEY") | nindent 12 }}
+            - name: DEPLOYMENT_ENV
+              value: {{ .Values.collector.deploymentEnv | quote }}
+          readinessProbe:
+            httpGet: {path: /, port: health}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /, port: health}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources: {{- toYaml .Values.collector.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/otelcol, readOnly: true}
+            - {name: tls, mountPath: /certs, readOnly: true}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $fn }}-collector-config
+        - name: tls
+          secret:
+            secretName: {{ .Values.collector.tls.secretName }}
+            defaultMode: 0440
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fn }}-collector
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "collector") | nindent 4 }}
+spec:
+  type: {{ .Values.collector.service.type }}
+  selector: {{- include "aiobs.selector" (dict "root" . "component" "collector") | nindent 4 }}
+  ports:
+    - {name: otlp-grpc, port: 4317, targetPort: otlp-grpc}
+    - {name: otlp-http, port: 4318, targetPort: otlp-http}
+    - {name: metrics, port: 8888, targetPort: metrics}

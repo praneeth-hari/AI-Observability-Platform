@@ -1,0 +1,134 @@
+{{- $fn := include "aiobs.fullname" . }}
+{{- $i := .Values.langfuse.init }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fn }}-langfuse-web
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "langfuse-web") | nindent 4 }}
+spec:
+  replicas: {{ .Values.langfuse.web.replicas }}
+  selector:
+    matchLabels: {{- include "aiobs.selector" (dict "root" . "component" "langfuse-web") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "aiobs.labels" (dict "root" . "component" "langfuse-web") | nindent 8 }}
+    spec:
+      containers:
+        - name: langfuse-web
+          image: docker.langfuse.com/langfuse/langfuse:{{ .Values.langfuse.imageTag }}
+          ports:
+            - {name: http, containerPort: 3000}
+          env:
+            {{- include "aiobs.langfuseEnv" (dict "root" . "mediaEndpoint" .Values.langfuse.mediaPublicEndpoint) | nindent 12 }}
+            {{- include "aiobs.secretEnv" (dict "root" . "name" "NEXTAUTH_SECRET") | nindent 12 }}
+            # Kubernetes sets HOSTNAME to the pod name, and Next.js then listens ONLY on the pod IP.
+            # That breaks `kubectl port-forward` (it connects to localhost inside the pod). Listen everywhere.
+            - {name: HOSTNAME, value: "0.0.0.0"}
+            - {name: NODE_OPTIONS, value: "--max-old-space-size={{ .Values.langfuse.web.nodeHeapMb }}"}
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT
+              value: "http://{{ $fn }}-minio:9000"
+            - {name: LANGFUSE_INIT_ORG_ID, value: {{ $i.orgId | quote }}}
+            - {name: LANGFUSE_INIT_ORG_NAME, value: {{ $i.orgName | quote }}}
+            - {name: LANGFUSE_INIT_PROJECT_ID, value: {{ $i.projectId | quote }}}
+            - {name: LANGFUSE_INIT_PROJECT_NAME, value: {{ $i.projectName | quote }}}
+            - {name: LANGFUSE_INIT_PROJECT_PUBLIC_KEY, value: {{ $i.projectPublicKey | quote }}}
+            - {name: LANGFUSE_INIT_USER_EMAIL, value: {{ $i.userEmail | quote }}}
+            - {name: LANGFUSE_INIT_USER_NAME, value: {{ $i.userName | quote }}}
+            {{- include "aiobs.secretEnv" (dict "root" . "name" "LANGFUSE_INIT_PROJECT_SECRET_KEY") | nindent 12 }}
+            {{- include "aiobs.secretEnv" (dict "root" . "name" "LANGFUSE_INIT_USER_PASSWORD") | nindent 12 }}
+          readinessProbe:
+            httpGet: {path: /api/public/health, port: http}
+            periodSeconds: 10
+            failureThreshold: 30     # first start runs database migrations: allow up to ~5 minutes
+          livenessProbe:
+            httpGet: {path: /api/public/health, port: http}
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            failureThreshold: 6
+          resources: {{- toYaml .Values.langfuse.web.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fn }}-langfuse-worker
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "langfuse-worker") | nindent 4 }}
+spec:
+  replicas: {{ .Values.langfuse.worker.replicas }}
+  selector:
+    matchLabels: {{- include "aiobs.selector" (dict "root" . "component" "langfuse-worker") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "aiobs.labels" (dict "root" . "component" "langfuse-worker") | nindent 8 }}
+    spec:
+      containers:
+        - name: langfuse-worker
+          image: docker.langfuse.com/langfuse/langfuse-worker:{{ .Values.langfuse.imageTag }}
+          ports:
+            - {name: http, containerPort: 3030}
+          env:
+            {{- include "aiobs.langfuseEnv" (dict "root" .) | nindent 12 }}
+            - {name: NODE_OPTIONS, value: "--max-old-space-size={{ .Values.langfuse.worker.nodeHeapMb }}"}
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            failureThreshold: 6
+          resources: {{- toYaml .Values.langfuse.worker.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fn }}-langfuse-web
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "langfuse-web") | nindent 4 }}
+spec:
+  selector: {{- include "aiobs.selector" (dict "root" . "component" "langfuse-web") | nindent 4 }}
+  ports:
+    - {name: http, port: 3000, targetPort: http}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fn }}-langfuse-worker
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "langfuse-worker") | nindent 4 }}
+spec:
+  selector: {{- include "aiobs.selector" (dict "root" . "component" "langfuse-worker") | nindent 4 }}
+  ports:
+    - {name: http, port: 3030, targetPort: http}
+{{- if .Values.langfuse.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fn }}-langfuse
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "langfuse-web") | nindent 4 }}
+  {{- with .Values.langfuse.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.langfuse.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.langfuse.ingress.tls }}
+  tls: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.langfuse.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fn }}-langfuse-web
+                port: {number: 3000}
+{{- end }}

@@ -57,6 +57,19 @@ def test_secret_looking_attribute_names_are_dropped(send, backend):
     assert "hunter2" not in backend.everything()
 
 
+def test_token_secrets_dropped_but_llm_token_counts_kept(send, backend):
+    """'token' in a NAME means a secret (drop it), but gen_ai.usage.*_tokens are LLM usage counts
+    that cost tracking needs (keep them). Regression: they used to be deleted by mistake."""
+    secrets = {"token": "a", "access_token": "b", "refresh_tokens": "c", "auth.token": "d",
+               "api_token": "e", "session_tokens": "f", "token_value": "g"}
+    counts = {"gen_ai.usage.input_tokens": 12, "gen_ai.usage.output_tokens": 34,
+              "gen_ai.request.max_tokens": 256}
+    send(lambda t: _span(t, "tok", {**secrets, **counts}))
+    span = backend.wait_for(lambda s: s["name"] == "tok")[0]
+    assert set(span["attrs"]) == set(counts), f"kept: {set(span['attrs'])}"
+    assert span["attrs"]["gen_ai.usage.input_tokens"] == 12
+
+
 def test_error_status_and_exception_events_are_masked(send, backend):
     def fn(tracer):
         with tracer.start_as_current_span("boom") as sp:

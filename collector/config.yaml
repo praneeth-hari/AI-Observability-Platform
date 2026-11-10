@@ -48,15 +48,17 @@ processors:
       # Resource attributes (service metadata) can carry sensitive values too
       - context: resource
         statements:
-          - delete_matching_keys(attributes, "(?i).*(password|passwd|secret|token|authorization|api[_-]?key|cookie).*")
+          - delete_matching_keys(attributes, "(?i).*(password|passwd|secret|authorization|api[_-]?key|cookie|token($|[^s])|(access|refresh|auth|api|bearer|session|id)[_.-]?tokens).*")
           - replace_all_patterns(attributes, "value", "(?i)bearer\\s+[A-Za-z0-9._~+/=-]{10,}", "[REDACTED_TOKEN]")
           - replace_all_patterns(attributes, "value", "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]")
           - replace_all_patterns(attributes, "value", "\\b(?:\\d[ -]?){13,19}\\b", "[REDACTED_CARD]")
           - replace_all_patterns(attributes, "value", "\\b\\d{3}-\\d{2}-\\d{4}\\b", "[REDACTED_SSN]")
       - context: span
         statements:
-          # 1) Drop attributes whose NAME looks like a secret
-          - delete_matching_keys(attributes, "(?i).*(password|passwd|secret|token|authorization|api[_-]?key|cookie).*")
+          # 1) Drop attributes whose NAME looks like a secret.
+          #    NOTE: plain "tokens" (gen_ai.usage.input_tokens) are LLM usage COUNTS needed for cost
+          #    tracking, so they are kept; "token" / "access_token" / "auth_tokens" etc. are dropped.
+          - delete_matching_keys(attributes, "(?i).*(password|passwd|secret|authorization|api[_-]?key|cookie|token($|[^s])|(access|refresh|auth|api|bearer|session|id)[_.-]?tokens).*")
           # 2) Mask sensitive VALUES inside every remaining string attribute
           #    (order matters: longer/more specific patterns first)
           - replace_all_patterns(attributes, "value", "(?i)bearer\\s+[A-Za-z0-9._~+/=-]{10,}", "[REDACTED_TOKEN]")
@@ -76,7 +78,7 @@ processors:
       - context: spanevent
         statements:
           # Exceptions are recorded as span events (message + stack trace)
-          - delete_matching_keys(attributes, "(?i).*(password|passwd|secret|token|authorization|api[_-]?key|cookie).*")
+          - delete_matching_keys(attributes, "(?i).*(password|passwd|secret|authorization|api[_-]?key|cookie|token($|[^s])|(access|refresh|auth|api|bearer|session|id)[_.-]?tokens).*")
           - replace_all_patterns(attributes, "value", "(?i)bearer\\s+[A-Za-z0-9._~+/=-]{10,}", "[REDACTED_TOKEN]")
           - replace_all_patterns(attributes, "value", "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]")
           - replace_all_patterns(attributes, "value", "\\b(?:\\d[ -]?){13,19}\\b", "[REDACTED_CARD]")

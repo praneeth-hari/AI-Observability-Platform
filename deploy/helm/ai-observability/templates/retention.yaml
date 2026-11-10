@@ -1,0 +1,52 @@
+{{- if .Values.retention.enabled }}
+{{- $fn := include "aiobs.fullname" . }}
+{{- $days := int .Values.retention.days }}
+{{- if or (lt $days 1) (gt $days 3650) }}{{ fail "retention.days must be a whole number between 1 and 3650" }}{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $fn }}-retention
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "retention") | nindent 4 }}
+spec:
+  schedule: {{ .Values.retention.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        metadata:
+          labels: {{- include "aiobs.labels" (dict "root" . "component" "retention") | nindent 12 }}
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsUser: 101
+            runAsGroup: 101
+          containers:
+            - name: retention
+              image: {{ .Values.clickhouse.image }}
+              env:
+                {{- include "aiobs.secretEnv" (dict "root" . "name" "CLICKHOUSE_PASSWORD") | nindent 16 }}
+              command: [sh, -c]
+              args:
+                - |
+                  set -eu
+                  ch() { clickhouse-client --host {{ $fn }}-clickhouse --user clickhouse --password "$CLICKHOUSE_PASSWORD" "$@"; }
+                  for spec in {{ range .Values.retention.tables }}{{ . | quote }} {{ end }}; do
+                    table="${spec%%:*}"; col="${spec##*:}"
+                    # tables are created by Langfuse's migrations; skip any that do not exist yet
+                    if [ "$(ch -q "EXISTS TABLE default.$table")" = "1" ]; then
+                      ch -q "ALTER TABLE default.$table MODIFY TTL toDateTime($col) + INTERVAL {{ $days }} DAY"
+                      echo "TTL {{ $days }} days set on $table"
+                    else
+                      echo "skipping $table (not created yet)"
+                    fi
+                  done
+              resources:
+                requests: {cpu: 10m, memory: 64Mi}
+                limits: {memory: 256Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+{{- end }}

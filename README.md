@@ -90,7 +90,42 @@ python scripts/backup.py restore backups/<timestamp> --yes    # REPLACES current
 Backups hold your data (possibly sensitive text): store them encrypted and off this machine. `backups/` is git-ignored.
 Schedule: Windows Task Scheduler / cron running `python scripts/backup.py backup --keep 7` nightly.
 
-Step 5 complete. Next: Step 6 (Kubernetes + Helm).
+Step 5 complete.
+
+## Step 2 — real agent (LangGraph + local LLM)
+`agent/langgraph_agent.py` is an agent that DECIDES which tool to use: plan -> tool -> plan -> ... -> answer (max 4 tool calls).
+Tools: `calculator` (safe, no `eval`), `lookup` (small knowledge base), `clock`.
+```bash
+pip install -r agent/requirements.txt        # adds langgraph
+ollama pull qwen2.5:3b                       # once; set OLLAMA_MODEL=qwen2.5:3b in .env
+cd agent
+python langgraph_agent.py --question "What time is it, and what is 12 * 7?"
+python langgraph_agent.py --fail             # calculator breaks; agent reports it instead of crashing
+python langgraph_agent.py --pii              # FAKE sensitive data; check Langfuse shows [REDACTED_*]
+python langgraph_agent.py --mock             # scripted LLM, no Ollama needed
+```
+Traces go through the same gateway (API key, TLS, redaction) and show in Langfuse with tags `step-2`, `langgraph`.
+Gateway fix found while building this: the redaction rule that drops secret-named fields also deleted `gen_ai.usage.input_tokens`/`output_tokens`; those counts are now kept (needed for cost tracking).
+
+## Step 6 — Kubernetes + Helm
+The whole platform as a Helm chart: `deploy/helm/ai-observability` (collector gateway, Langfuse web + worker, Postgres, ClickHouse, Redis, MinIO, nightly retention job, network policies).
+Passwords never appear in the chart: pods read them from a Kubernetes Secret created from your `.env` (`scripts/k8s_secrets.py`). The collector config is the SAME file as Compose uses (a test fails if the copies drift).
+
+Try it on your laptop with a throwaway kind cluster (stop Compose first, they use the same ports and RAM):
+```bash
+docker compose stop                                   # NOT "down": keeps your data
+kind create cluster --name ai-obs --config deploy/kind/kind-config.yaml
+kubectl create namespace ai-obs
+python scripts/k8s_secrets.py --namespace ai-obs | kubectl apply -f -
+helm install ai-observability deploy/helm/ai-observability -n ai-obs -f deploy/helm/ai-observability/values-kind.yaml
+kubectl get pods -n ai-obs -w                         # wait until all are Running/Ready (first start: ~5 min)
+kubectl port-forward -n ai-obs svc/ai-observability-langfuse-web 3000:3000     # window 1: UI
+kubectl port-forward -n ai-obs svc/ai-observability-collector 4318:4318        # window 2: agents
+```
+The agents work unchanged (`https://localhost:4318`, same API key and CA).
+Remove everything: `kind delete cluster --name ai-obs`, then `docker compose start`.
+
+Known gaps (planned): MinIO image is unpinned (Chainguard publishes only `latest`; pin by digest later); databases are single-instance (managed Postgres/ClickHouse for production comes with the enterprise values in Step 8); TLS certificate is the dev CA (cert-manager in Step 8).
 
 ## Tests (Step 4)
 Automated tests start a real collector with `collector/config.yaml` (on ports 14xxx, so they never clash with your running stack) and a fake Langfuse that records what the collector exports.
@@ -102,13 +137,13 @@ python -m pytest                                                  # needs Docker
 ```
 | Group | What it proves |
 |---|---|
-| Redaction (21 tests) | 15 kinds of sensitive text are masked; nested JSON, error messages, stack traces and resource attributes are covered; secret-named fields are dropped; normal text is untouched; oversized values are cut |
+| Redaction (22 tests) | 15 kinds of sensitive text are masked; nested JSON, error messages, stack traces and resource attributes are covered; secret-named fields are dropped (but LLM `*_tokens` usage counts are kept); normal text is untouched; oversized values are cut |
 | Security (12 tests) | agents without/with a wrong API key get 401 and nothing is stored; health probes stay open; plain HTTP and untrusted certificates are refused; spans arrive over TLS |
 | Secrets (12 tests) | placeholders/defaults/short/reused secrets are detected; generated secrets are strong and unique; compose has no weak fallbacks and refuses to start without secrets; no keys/tokens are committed |
-| Retention (14 tests) | deletion rules cover all 6 trace tables, reject bad input, delete old rows and keep recent ones on a real ClickHouse engine, exact to the day |
-| Backup (11 tests) | correct command order, services always restarted, damaged backups detected, restore refuses without `--yes` or from a damaged backup, old backups pruned safely |
 | Retention (15 tests) | TTL SQL targets the right tables/columns, rejects bad input, and **really deletes old rows in an embedded ClickHouse** (needs `pip install chdb`, otherwise skipped) |
 | Backups (9 tests) | stack restarts even if archiving fails; partial backups are removed; corruption is detected; restore needs `--yes`, an intact backup and matching secrets; never uses `down -v` |
+| LangGraph agent (see Step 2) | safe calculator refuses code/huge numbers; untrusted model output can't pick unknown tools; the plan-tool loop is bounded and can't repeat a call; every span is a child of `agent.run`; tool failures are recorded and the agent recovers; PII is redacted for these traces too |
+| Helm chart (24 tests) + k8s secrets (6) | chart lints and renders; no password is ever a literal; every secret key exists and is used; `$(VAR)` references are valid; selectors match pods; collector hardened (non-root, read-only filesystem); databases reachable only from Langfuse; retention tables = `scripts/retention.py`; the collector config copy equals `collector/config.yaml`; k8s secrets refuse weak values and never include the CA private key |
 | Pipeline (5 tests) | traces keep their parent/child structure; gateway adds environment labels; garbage input is rejected without crashing; spans survive a backend outage (retry); the collector works after a restart |
 
 GitHub runs the same tests on every push (`.github/workflows/ci.yml`).
@@ -125,7 +160,11 @@ Known limit: spans waiting in the collector's in-memory queue are lost if the co
 ## Layout
 ```
 docker-compose.yml        Langfuse stack + collector gateway
-collector/config.yaml     Collector pipeline (Step 2 adds redaction here)
-agent/agent.py            Instrumented sample agent (Ollama or mock LLM)
+collector/config.yaml     Collector pipeline (auth, TLS, redaction)
+deploy/helm/ai-observability/   Helm chart (Step 6)
+deploy/kind/kind-config.yaml    Local test cluster
+scripts/k8s_secrets.py    .env + certs -> Kubernetes Secrets
+agent/agent.py            Step 1 scripted sample agent (Ollama or mock LLM)
+agent/langgraph_agent.py  Step 2 LangGraph agent with tools
 .env.example              Secrets and bootstrap keys
 ```

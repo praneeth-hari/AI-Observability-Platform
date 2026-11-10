@@ -34,6 +34,11 @@ jobs:
       - name: Install an embedded ClickHouse (lets retention tests run against a real engine)
         run: pip install chdb
 
+      - name: Install Helm (chart tests render the real chart)
+        uses: azure/setup-helm@v4
+        with:
+          version: v4.3.1
+
       - name: Pull the collector image
         run: docker pull otel/opentelemetry-collector-contrib:0.165.0
 
