@@ -11,7 +11,6 @@ See every step an agent takes, find where it failed, and keep private data out o
 ![Langfuse](https://img.shields.io/badge/UI-Langfuse-orange)
 ![Kubernetes](https://img.shields.io/badge/deploy-Kubernetes%20%2B%20Helm-326ce5)
 ![GitOps](https://img.shields.io/badge/GitOps-Argo%20CD-ef7b4d)
-![Built with AI](https://img.shields.io/badge/built%20with-Claude%20(AI%20pair--programming)-lightgrey)
 
 </div>
 
@@ -120,30 +119,19 @@ python -m pytest        # needs Docker (or OTELCOL_BIN) and helm on PATH; takes 
 
 Tests cover redaction, authentication, TLS, pipeline reliability, secrets handling, retention (including real deletion in an embedded ClickHouse), backup and restore, the LangGraph agent, the Helm chart and the Argo CD application.
 
-## Built with AI assistance
-
-This project was built through **human-directed AI pair-programming with Claude (Anthropic)**. The product requirements, scope, architecture decisions and acceptance of each step are human decisions (for example: Langfuse instead of Arize Phoenix for a fully open-source stack, and local LLMs instead of paid APIs). Claude drafted code, tests and documentation.
-
-AI-written code is treated like any contributor's code: nothing is trusted until a test or a real run proves it. Every step was executed on a real machine, and the tests are checked to be able to fail (deliberately breaking the code and confirming the tests notice). Real problems surfaced this way, and were fixed with a regression test each:
-
-- The redaction rule for secret-named fields silently deleted the LLM **token counts**, which would have broken cost reporting.
-- Langfuse was unreachable through `kubectl port-forward` until its web server was told to listen on all interfaces.
-- Langfuse crashed with an out-of-memory error under a small container limit; heap sizes are now set explicitly and tested.
-- A parser that rejected a model reply containing two JSON objects made a small LLM look as if it could not use tools.
-
 ## Roadmap
 
-| Step | What it covers (in plain English) | Status |
+| Step | What it covers | Status |
 |---|---|---|
 | 1 | Run the whole platform on one computer, with a small sample AI agent that sends traces | Done |
 | 2 | A real AI agent (built with LangGraph) that uses a local language model (LLM) | Done |
-| 3 | Automatically hide personal data (PII: personally identifiable information, such as names and phone numbers) before traces are stored | Done |
+| 3 | Automatically hide personal data (PII: personally identifiable information, such as e-mail addresses, phone numbers and card numbers) before traces are stored | Done |
 | 4 | Automated tests, run on every change by CI (continuous integration) | Done |
 | 5 | Security basics: API key for agents, TLS encryption, protected secrets, data retention (automatic deletion of old data) and backups | Done |
 | 6 | Run on Kubernetes, packaged with Helm so it installs the same way everywhere | Done |
 | 7 | GitOps with Argo CD (the cluster follows what is in Git automatically), plus CI/CD (continuous integration and continuous delivery), including automatic chart releases | Done |
-| 8 | Enterprise controls. Monitoring and alerts (Prometheus and Grafana): done. Automatic TLS certificates (cert-manager): in progress. SSO (single sign-on) with RBAC (role-based access control), and a secrets vault: planned | In progress |
-| 9 | Onboarding guide and template so any team can connect its AI agents (Databricks is documented as an example, not tested) | Planned |
+| 8 | Enterprise controls. Monitoring and alerts (Prometheus and Grafana): done. Automatic TLS certificates (cert-manager): done. SSO (single sign-on) with RBAC (role-based access control), and a secrets vault: planned | In progress |
+| 9 | Onboarding guide ([docs/ONBOARDING.md](docs/ONBOARDING.md)), a copy-paste template and a demo agent so any team can connect its AI agents (a Databricks example is documented but not tested) | In progress |
 | 10 | Cost and quality dashboards, load test, runbook (what to do when something breaks) and handover | Planned |
 
 ### Glossary
