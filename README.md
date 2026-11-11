@@ -131,7 +131,7 @@ Tests cover redaction, authentication, TLS, pipeline reliability, secrets handli
 | 6 | Run on Kubernetes, packaged with Helm so it installs the same way everywhere | Done |
 | 7 | GitOps with Argo CD (the cluster follows what is in Git automatically), plus CI/CD (continuous integration and continuous delivery), including automatic chart releases | Done |
 | 8 | Enterprise controls. Monitoring and alerts (Prometheus and Grafana): done. Automatic TLS certificates (cert-manager): done. SSO (single sign-on) with RBAC (role-based access control), and a secrets vault: planned | In progress |
-| 9 | Onboarding guide ([docs/ONBOARDING.md](docs/ONBOARDING.md)), a copy-paste template and a demo agent so any team can connect its AI agents (a Databricks example is documented but not tested) | In progress |
+| 9 | Onboarding guide ([docs/ONBOARDING.md](docs/ONBOARDING.md)), a copy-paste template and a demo agent so any team can connect its AI agents (a Databricks example is documented but not tested) | Done |
 | 10 | Cost and quality dashboards, load test, runbook (what to do when something breaks) and handover | Planned |
 
 ### Glossary
