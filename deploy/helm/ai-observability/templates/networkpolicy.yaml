@@ -89,4 +89,31 @@ spec:
         {{- end }}
 ---
 {{- end }}
+{{- if .Values.monitoring.enabled }}
+---
+# Monitoring: Prometheus is reachable inside the namespace (Grafana, port-forward); Grafana by users.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fn }}-allow-prometheus
+spec:
+  podSelector:
+    matchLabels: {{- include "aiobs.selector" (dict "root" . "component" "prometheus") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - {port: 9090, protocol: TCP}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fn }}-allow-grafana
+spec:
+  podSelector:
+    matchLabels: {{- include "aiobs.selector" (dict "root" . "component" "grafana") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - {port: 3000, protocol: TCP}
+{{- end }}
 {{- end }}

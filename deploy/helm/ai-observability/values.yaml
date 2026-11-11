@@ -107,3 +107,21 @@ retention:
 
 networkPolicy:
   enabled: true                             # only the pods that need to talk to each other can
+
+# Optional monitoring of the collector itself: Prometheus (metrics + alert rules) and Grafana (dashboard).
+# Grafana's admin password is the same Secret key as the Langfuse admin (LANGFUSE_INIT_USER_PASSWORD).
+monitoring:
+  enabled: false
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    retention: 7d
+    scrapeInterval: 15s
+    resources:
+      requests: {cpu: 50m, memory: 128Mi}
+      limits: {memory: 256Mi}
+  grafana:
+    image: grafana/grafana:11.6.0
+    adminUser: admin
+    resources:
+      requests: {cpu: 50m, memory: 128Mi}
+      limits: {memory: 256Mi}

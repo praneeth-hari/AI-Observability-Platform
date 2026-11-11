@@ -1,0 +1,45 @@
+# Alert rules for the collector (loaded by Prometheus, not templated by Helm).
+# Alerts show on the Prometheus "Alerts" page and in Grafana. Sending them to email/Slack needs
+# Alertmanager, which is a later add-on.
+groups:
+  - name: ai-observability-collector
+    rules:
+      - alert: CollectorDown
+        expr: up{job="otel-collector"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "The OpenTelemetry collector is down"
+          description: "Prometheus cannot scrape the collector. Agents cannot send traces."
+
+      - alert: ExportFailing
+        expr: rate(otelcol_exporter_send_failed_spans[5m]) > 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "The collector cannot deliver spans to Langfuse"
+          description: "Spans are failing to export ({{ $value | humanize }} per second). Check that langfuse-web is healthy."
+
+      - alert: ExportQueueFilling
+        expr: otelcol_exporter_queue_size / otelcol_exporter_queue_capacity > 0.5
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "The collector retry queue is more than half full"
+          description: "Langfuse is slow or down; batches are piling up in the retry queue."
+
+      - alert: SpansRefused
+        expr: rate(otelcol_receiver_refused_spans[5m]) > 0
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "The collector is refusing incoming spans"
+          description: "Agents are being refused ({{ $value | humanize }} spans per second). Look for memory pressure."
+
+      - alert: CollectorMemoryHigh
+        expr: otelcol_process_memory_rss > 300000000
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "The collector uses more than 300 MB of memory"
+          description: "Close to the container limit (384Mi in the kind setup). Raise the limit or add replicas."

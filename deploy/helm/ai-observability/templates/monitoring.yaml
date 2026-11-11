@@ -1,0 +1,181 @@
+{{- if .Values.monitoring.enabled }}
+{{- $fn := include "aiobs.fullname" . }}
+{{- $p := .Values.monitoring.prometheus }}
+{{- $g := .Values.monitoring.grafana }}
+# Prometheus scrapes the collector's own metrics; Grafana shows them. Both are optional (monitoring.enabled).
+# Prometheus keeps its data in an emptyDir: history is lost when its pod restarts (known limitation).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fn }}-prometheus-config
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "prometheus") | nindent 4 }}
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: {{ $p.scrapeInterval }}
+      evaluation_interval: {{ $p.scrapeInterval }}
+    rule_files:
+      - /etc/prometheus/rules.yaml
+    scrape_configs:
+      - job_name: otel-collector
+        static_configs:
+          - targets: ["{{ $fn }}-collector:8888"]
+  rules.yaml: |
+{{ .Files.Get "files/prometheus-rules.yaml" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fn }}-prometheus
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "prometheus") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "aiobs.selector" (dict "root" . "component" "prometheus") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "aiobs.labels" (dict "root" . "component" "prometheus") | nindent 8 }}
+      annotations:
+        checksum/config: {{ printf "%s%s%s" .Values.monitoring.prometheus.scrapeInterval (.Files.Get "files/prometheus-rules.yaml") $fn | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: prometheus
+          image: {{ $p.image }}
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time={{ $p.retention }}
+          ports:
+            - {name: http, containerPort: 9090}
+          readinessProbe:
+            httpGet: {path: /-/ready, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /-/healthy, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources: {{- toYaml $p.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/prometheus, readOnly: true}
+            - {name: data, mountPath: /prometheus}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $fn }}-prometheus-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fn }}-prometheus
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "prometheus") | nindent 4 }}
+spec:
+  selector: {{- include "aiobs.selector" (dict "root" . "component" "prometheus") | nindent 4 }}
+  ports:
+    - {name: http, port: 9090, targetPort: http}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fn }}-grafana-config
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "grafana") | nindent 4 }}
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://{{ $fn }}-prometheus:9090
+        isDefault: true
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: ai-observability
+        type: file
+        options:
+          path: /var/lib/grafana-dashboards
+  collector-health.json: |
+{{ .Files.Get "files/grafana-dashboard.json" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fn }}-grafana
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "grafana") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "aiobs.selector" (dict "root" . "component" "grafana") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "aiobs.labels" (dict "root" . "component" "grafana") | nindent 8 }}
+      annotations:
+        checksum/dashboard: {{ .Files.Get "files/grafana-dashboard.json" | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: grafana
+          image: {{ $g.image }}
+          ports:
+            - {name: http, containerPort: 3000}
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: {{ $g.adminUser | quote }}
+            {{- include "aiobs.secretEnv" (dict "root" . "name" "LANGFUSE_INIT_USER_PASSWORD" "as" "GF_SECURITY_ADMIN_PASSWORD") | nindent 12 }}
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+            - name: GF_ANALYTICS_CHECK_FOR_UPDATES
+              value: "false"
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources: {{- toYaml $g.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/grafana}
+            - {name: config, mountPath: /etc/grafana/provisioning/datasources/datasource.yaml, subPath: datasource.yaml, readOnly: true}
+            - {name: config, mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml, subPath: dashboards.yaml, readOnly: true}
+            - {name: config, mountPath: /var/lib/grafana-dashboards/collector-health.json, subPath: collector-health.json, readOnly: true}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $fn }}-grafana-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fn }}-grafana
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "grafana") | nindent 4 }}
+spec:
+  selector: {{- include "aiobs.selector" (dict "root" . "component" "grafana") | nindent 4 }}
+  ports:
+    - {name: http, port: 3000, targetPort: http}
+{{- end }}

@@ -28,3 +28,5 @@ redis:
   storage: 512Mi
 minio:
   storage: 2Gi
+monitoring:
+  enabled: true

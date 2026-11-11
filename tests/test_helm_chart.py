@@ -267,3 +267,60 @@ def test_node_heap_is_below_the_memory_limit_for_langfuse(values):
         assert heap <= limit * 0.75, f"{d['metadata']['name']}: heap {heap}MiB too close to limit {limit}MiB"
         if d["metadata"]["name"].endswith("web"):
             assert heap >= 1024, "web needs a heap of at least 1GiB"
+
+
+# ---- optional monitoring (Prometheus + Grafana) ----
+
+def test_monitoring_is_off_by_default(docs):
+    names = {d["metadata"]["name"] for d in docs}
+    assert not any("prometheus" in n or "grafana" in n for n in names)
+
+
+@pytest.fixture(scope="module")
+def mon():
+    p = render("--set", "monitoring.enabled=true")
+    assert p.returncode == 0, p.stderr
+    return [d for d in yaml.safe_load_all(p.stdout) if d]
+
+
+def test_monitoring_adds_prometheus_and_grafana(mon):
+    deps = {d["metadata"]["name"].replace("aiobs-ai-observability-", "") for d in of_kind(mon, "Deployment")}
+    assert {"prometheus", "grafana"} <= deps
+
+
+def test_monitoring_containers_are_pinned_limited_and_probed(mon):
+    for name, c in containers(mon):
+        if "prometheus" in name or "grafana" in name:
+            assert not c["image"].endswith(":latest") and ":" in c["image"]
+            assert c["resources"]["limits"]["memory"]
+            assert "readinessProbe" in c
+            assert c["securityContext"]["allowPrivilegeEscalation"] is False
+
+
+def test_prometheus_scrapes_the_collector_metrics_port(mon):
+    cm = next(d for d in of_kind(mon, "ConfigMap") if d["metadata"]["name"].endswith("prometheus-config"))
+    cfg = yaml.safe_load(cm["data"]["prometheus.yml"])
+    target = cfg["scrape_configs"][0]["static_configs"][0]["targets"][0]
+    svc = next(d for d in of_kind(mon, "Service") if d["metadata"]["name"].endswith("-collector"))
+    assert target == f'{svc["metadata"]["name"]}:8888'
+    assert any(p["port"] == 8888 for p in svc["spec"]["ports"])
+    assert yaml.safe_load(cm["data"]["rules.yaml"])["groups"]
+
+
+def test_grafana_password_comes_from_the_secret(mon):
+    g = next(d for d in of_kind(mon, "Deployment") if d["metadata"]["name"].endswith("grafana"))
+    env = {e["name"]: e for e in g["spec"]["template"]["spec"]["containers"][0]["env"]}
+    ref = env["GF_SECURITY_ADMIN_PASSWORD"]["valueFrom"]["secretKeyRef"]
+    assert ref["key"] == "LANGFUSE_INIT_USER_PASSWORD" and ref["name"] == "ai-obs-secrets"
+
+
+def test_grafana_dashboard_and_datasource_are_provisioned(mon):
+    cm = next(d for d in of_kind(mon, "ConfigMap") if d["metadata"]["name"].endswith("grafana-config"))
+    assert {"datasource.yaml", "dashboards.yaml", "collector-health.json"} <= set(cm["data"])
+    ds = yaml.safe_load(cm["data"]["datasource.yaml"])["datasources"][0]
+    assert ds["uid"] == "prometheus" and ds["url"].endswith("-prometheus:9090")
+
+
+def test_network_policies_cover_monitoring(mon):
+    pols = {p["metadata"]["name"] for p in of_kind(mon, "NetworkPolicy")}
+    assert any(n.endswith("allow-prometheus") for n in pols) and any(n.endswith("allow-grafana") for n in pols)
