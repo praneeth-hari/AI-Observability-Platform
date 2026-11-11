@@ -49,3 +49,10 @@ def test_dashboard_is_valid_and_uses_known_metrics():
         assert p["datasource"]["uid"] == "prometheus"
         for t in p["targets"]:
             assert metrics_in(t["expr"]) <= KNOWN, t["expr"]
+
+
+def test_delivered_panel_counts_only_the_langfuse_exporter():
+    """The collector also has a debug exporter; adding both would show double the real delivery."""
+    dash = json.loads((FILES / "grafana-dashboard.json").read_text())
+    panel = next(p for p in dash["panels"] if p["title"] == "Spans delivered to Langfuse per second")
+    assert 'exporter="otlp_http/langfuse"' in panel["targets"][0]["expr"]
