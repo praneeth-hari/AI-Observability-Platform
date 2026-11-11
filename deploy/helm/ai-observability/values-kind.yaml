@@ -30,3 +30,5 @@ minio:
   storage: 2Gi
 monitoring:
   enabled: true
+certManager:
+  enabled: true

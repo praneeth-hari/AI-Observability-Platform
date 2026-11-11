@@ -69,7 +69,15 @@ spec:
             name: {{ $fn }}-collector-config
         - name: tls
           secret:
+            {{- if .Values.certManager.enabled }}
+            secretName: {{ .Values.certManager.secretName }}
+            items:   # cert-manager names the files tls.crt/tls.key; the collector config expects server.crt/server.key
+              - {key: tls.crt, path: server.crt}
+              - {key: tls.key, path: server.key}
+              - {key: ca.crt, path: ca.crt}
+            {{- else }}
             secretName: {{ .Values.collector.tls.secretName }}
+            {{- end }}
             defaultMode: 0440
 ---
 apiVersion: v1

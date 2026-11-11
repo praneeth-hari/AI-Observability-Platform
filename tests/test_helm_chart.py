@@ -324,3 +324,45 @@ def test_grafana_dashboard_and_datasource_are_provisioned(mon):
 def test_network_policies_cover_monitoring(mon):
     pols = {p["metadata"]["name"] for p in of_kind(mon, "NetworkPolicy")}
     assert any(n.endswith("allow-prometheus") for n in pols) and any(n.endswith("allow-grafana") for n in pols)
+
+
+# ---- optional cert-manager certificate ----
+
+def test_cert_manager_is_off_by_default(docs):
+    assert not of_kind(docs, "Certificate") and not of_kind(docs, "Issuer")
+
+
+@pytest.fixture(scope="module")
+def cm():
+    p = render("--set", "certManager.enabled=true")
+    assert p.returncode == 0, p.stderr
+    return [d for d in yaml.safe_load_all(p.stdout) if d]
+
+
+def test_cert_manager_makes_a_private_ca_and_a_server_certificate(cm):
+    certs = {c["metadata"]["name"].replace("aiobs-ai-observability-", ""): c for c in of_kind(cm, "Certificate")}
+    issuers = {i["metadata"]["name"].replace("aiobs-ai-observability-", ""): i for i in of_kind(cm, "Issuer")}
+    assert set(certs) == {"ca", "collector-tls"} and set(issuers) == {"selfsigned", "ca-issuer"}
+    assert certs["ca"]["spec"]["isCA"] is True and not certs["collector-tls"]["spec"].get("isCA")
+    assert certs["collector-tls"]["spec"]["issuerRef"]["name"].endswith("ca-issuer")
+    assert issuers["ca-issuer"]["spec"]["ca"]["secretName"] == certs["ca"]["spec"]["secretName"]
+    assert certs["collector-tls"]["spec"]["usages"] == ["server auth"]
+
+
+def test_certificate_covers_the_names_agents_use(cm):
+    leaf = next(c for c in of_kind(cm, "Certificate") if c["metadata"]["name"].endswith("collector-tls"))
+    names = leaf["spec"]["dnsNames"]
+    assert "localhost" in names and any(n.endswith("-collector.default.svc") for n in names)
+
+
+def test_collector_mounts_the_cert_manager_secret_with_the_expected_file_names(cm):
+    dep = next(d for d in of_kind(cm, "Deployment") if d["metadata"]["name"].endswith("-collector"))
+    vol = next(v for v in dep["spec"]["template"]["spec"]["volumes"] if v["name"] == "tls")["secret"]
+    leaf = next(c for c in of_kind(cm, "Certificate") if c["metadata"]["name"].endswith("collector-tls"))
+    assert vol["secretName"] == leaf["spec"]["secretName"]
+    assert {i["path"] for i in vol["items"]} == {"server.crt", "server.key", "ca.crt"}
+
+
+def test_collector_reloads_a_renewed_certificate():
+    text = (ROOT / "collector" / "config.yaml").read_text()
+    assert text.count("reload_interval") == 2

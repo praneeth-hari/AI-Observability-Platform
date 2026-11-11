@@ -22,6 +22,7 @@ receivers:
         tls:
           cert_file: /certs/server.crt
           key_file: /certs/server.key
+          reload_interval: 1h        # pick up a renewed certificate without a restart
           min_version: "1.2"
         auth:
           authenticator: bearertokenauth/agents
@@ -30,6 +31,7 @@ receivers:
         tls:
           cert_file: /certs/server.crt
           key_file: /certs/server.key
+          reload_interval: 1h        # pick up a renewed certificate without a restart
           min_version: "1.2"
         auth:
           authenticator: bearertokenauth/agents

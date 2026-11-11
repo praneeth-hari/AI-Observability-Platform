@@ -1,0 +1,58 @@
+{{- if .Values.certManager.enabled }}
+{{- $fn := include "aiobs.fullname" . }}
+{{- $ns := .Release.Namespace }}
+# cert-manager issues the collector's TLS certificate from a small private CA and renews it by itself.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $fn }}-selfsigned
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "tls") | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $fn }}-ca
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "tls") | nindent 4 }}
+spec:
+  isCA: true
+  commonName: ai-observability-ca
+  secretName: {{ $fn }}-ca
+  duration: 8760h
+  renewBefore: 720h
+  privateKey: {algorithm: ECDSA, size: 256}
+  issuerRef: {name: {{ $fn }}-selfsigned, kind: Issuer}
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $fn }}-ca-issuer
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "tls") | nindent 4 }}
+spec:
+  ca:
+    secretName: {{ $fn }}-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $fn }}-collector-tls
+  labels: {{- include "aiobs.labels" (dict "root" . "component" "tls") | nindent 4 }}
+spec:
+  secretName: {{ .Values.certManager.secretName }}
+  duration: {{ .Values.certManager.duration }}
+  renewBefore: {{ .Values.certManager.renewBefore }}
+  usages: [server auth]
+  privateKey: {algorithm: ECDSA, size: 256}
+  dnsNames:
+    - localhost
+    - {{ $fn }}-collector
+    - {{ $fn }}-collector.{{ $ns }}
+    - {{ $fn }}-collector.{{ $ns }}.svc
+    - {{ $fn }}-collector.{{ $ns }}.svc.cluster.local
+    {{- range .Values.certManager.extraDnsNames }}
+    - {{ . }}
+    {{- end }}
+  ipAddresses: ["127.0.0.1"]
+  issuerRef: {name: {{ $fn }}-ca-issuer, kind: Issuer}
+{{- end }}

@@ -125,3 +125,14 @@ monitoring:
     resources:
       requests: {cpu: 50m, memory: 128Mi}
       limits: {memory: 256Mi}
+
+# Automatic TLS certificate for the collector, issued and renewed by cert-manager
+# (cert-manager must already be installed in the cluster). When enabled it replaces the Secret
+# made by scripts/k8s_secrets.py (collector.tls.secretName is then unused).
+# This chart creates a small private CA; for a real domain, point issuerRef at your own (ACME) issuer instead.
+certManager:
+  enabled: false
+  secretName: ai-obs-collector-cert
+  duration: 2160h          # certificate lifetime (90 days)
+  renewBefore: 720h        # renew 30 days before it expires
+  extraDnsNames: []        # add public names agents use, e.g. [otel.example.com]
