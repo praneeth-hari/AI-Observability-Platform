@@ -133,18 +133,42 @@ AI-written code is treated like any contributor's code: nothing is trusted until
 
 ## Roadmap
 
-| Step | Scope | Status |
+| Step | What it covers (in plain English) | Status |
 |---|---|---|
-| 1 | Local stack and sample agent | done |
-| 2 | Real agent (LangGraph + local LLM) | done |
-| 3 | PII redaction at the gateway | done |
-| 4 | Automated tests and CI | done |
-| 5 | Security basics: API key, TLS, secrets, retention, backups | done |
-| 6 | Kubernetes and Helm | done |
-| 7 | GitOps with Argo CD, CI/CD | in progress |
-| 8 | SSO/RBAC, cert-manager, secrets vault, monitoring and alerts | planned |
-| 9 | Onboarding Databricks agents, documentation | planned |
-| 10 | Cost and quality dashboards, load test, runbook, handover | planned |
+| 1 | Run the whole platform on one computer, with a small sample AI agent that sends traces | Done |
+| 2 | A real AI agent (built with LangGraph) that uses a local language model (LLM) | Done |
+| 3 | Automatically hide personal data (PII: personally identifiable information, such as names and phone numbers) before traces are stored | Done |
+| 4 | Automated tests, run on every change by CI (continuous integration) | Done |
+| 5 | Security basics: API key for agents, TLS encryption, protected secrets, data retention (automatic deletion of old data) and backups | Done |
+| 6 | Run on Kubernetes, packaged with Helm so it installs the same way everywhere | Done |
+| 7 | GitOps with Argo CD (the cluster follows what is in Git automatically), plus CI/CD (continuous integration and continuous delivery), including automatic chart releases | Done |
+| 8 | Enterprise controls. Monitoring and alerts (Prometheus and Grafana): done. Automatic TLS certificates (cert-manager): in progress. SSO (single sign-on) with RBAC (role-based access control), and a secrets vault: planned | In progress |
+| 9 | Onboarding guide and template so any team can connect its AI agents (Databricks is documented as an example, not tested) | Planned |
+| 10 | Cost and quality dashboards, load test, runbook (what to do when something breaks) and handover | Planned |
+
+### Glossary
+
+| Term | Full form / meaning |
+|---|---|
+| AI agent | A program that uses a language model to answer questions and use tools |
+| Trace | The recorded story of one agent run: each step, its timing and its cost |
+| OpenTelemetry (OTel) | An open standard for sending traces from any program |
+| OTLP | OpenTelemetry Protocol, the format traces are sent in |
+| Collector | The gateway that receives traces, checks the API key, hides personal data and forwards them |
+| Langfuse | The open-source tool that stores and shows the traces |
+| PII | Personally identifiable information |
+| TLS | Transport Layer Security, encryption for data in transit |
+| LLM | Large language model, the AI model behind an agent |
+| Kubernetes | A system that runs and restarts the platform's programs (containers) |
+| Helm | The packaging tool for Kubernetes (a "chart" is one package) |
+| Argo CD | Keeps the cluster identical to what is stored in Git |
+| GitOps | Managing infrastructure by changing files in Git, not by hand |
+| CI/CD | Continuous integration (automatic tests) and continuous delivery (automatic releases) |
+| Prometheus | Collects the platform's own health numbers |
+| Grafana | Shows those numbers as dashboards |
+| cert-manager | Creates and renews TLS certificates automatically |
+| SSO | Single sign-on: one company login for every tool |
+| RBAC | Role-based access control: what each person is allowed to do |
 
 ## Known limitations
 
