@@ -1,0 +1,28 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.3.1
+      - name: Lint chart
+        run: helm lint deploy/helm/ai-observability -f deploy/helm/ai-observability/values-kind.yaml
+      - name: Package chart
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          helm package deploy/helm/ai-observability --version "$VERSION" --app-version "$VERSION" --destination dist
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.tgz --title "$GITHUB_REF_NAME" --generate-notes
+
