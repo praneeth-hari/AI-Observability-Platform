@@ -116,16 +116,16 @@ The concept document asks for a build-versus-integrate decision before committin
 Recommendation: run a pilot with one approved Databricks agent exporting over OTLP to this collector, and compare
 debugging time against the team's current method, before investing in HA or multi-region.
 
-## 7. Measuring success (fill in from a real run)
+## 7. Measuring success (results from a laptop run)
 
 | Metric (from the concept document) | How to measure now | Result |
 |---|---|---|
-| Ingestion success rate | `python scripts/load_test.py --traces 500` (error rate line) | |
-| Collector error / drop rate | Grafana "Export failures per second" during the test | |
-| Throughput and latency | Same load test (traces per second, p95 latency). Through a port-forward these are a floor, not a ceiling | |
-| Privacy effectiveness | `python scripts/langfuse_quality.py score`: share of traces with `no_pii_leak = 1` | |
-| Cost transparency | Share of traces showing a cost after model prices are loaded | |
-| Debugging time vs baseline | Needs a pilot with real users | |
+| Ingestion success rate | `python scripts/load_test.py --traces 500` (error rate line) | 100% (0 failed of 200 traces per run, two runs; all 400 load-test traces delivered to Langfuse) |
+| Collector error / drop rate | Grafana "Export failures per second" during the test | 0 export failures and 0 refused spans during the test |
+| Throughput and latency | Same load test (traces per second, p95 latency). Through a port-forward these are a floor, not a ceiling | about 340 to 380 traces per second; p95 about 11 to 13 ms (measured through a port-forward on a laptop, so a floor, not a ceiling) |
+| Privacy effectiveness | `python scripts/langfuse_quality.py score`: share of traces with `no_pii_leak = 1` | 100% of the checked agent traces had no_pii_leak = 1 (no raw e-mail, phone, card or ID patterns found). Names of people are not masked |
+| Cost transparency | Share of traces showing a cost after model prices are loaded | Cost shown on traces after model prices were loaded (example: $0.000037 per call for the demo model) |
+| Debugging time vs baseline | Needs a pilot with real users | Not measured. Needs a pilot with real users |
 
 ## 8. Where things are
 
