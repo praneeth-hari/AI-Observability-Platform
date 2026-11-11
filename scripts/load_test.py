@@ -79,6 +79,9 @@ def build_request(index, spans_per_trace=5, run_id="run"):
         if n == 0:
             _attr(sp, "langfuse.trace.name", "load-test")
             _attr(sp, "langfuse.trace.input", f"load test {run_id} #{index}")
+            _attr(sp, "langfuse.observation.input", f"load test {run_id} #{index}")
+            _attr(sp, "langfuse.trace.output", "ok")
+            _attr(sp, "langfuse.observation.output", "ok")
         elif n == spans_per_trace - 1:
             _attr(sp, "langfuse.observation.type", "generation")
             _attr(sp, "gen_ai.request.model", "fake-llm")

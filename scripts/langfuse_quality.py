@@ -18,6 +18,11 @@ score:  looks at recent traces and adds simple, automatic quality scores (1 = go
                           (a live check that the collector's redaction worked)
         Re-running is safe: each score has a fixed id, so it is updated, not duplicated.
 
+Works with Langfuse 4.x (events-only storage): traces are read as "top-level observations" through
+GET /api/public/v2/observations, because the older "list traces" call no longer exists there.
+A trace's input, output and latency come from its top-level step, so agents must record input and output
+on that step (the onboarding template's trace_run / set_run_output do).
+
 Settings (environment or .env): LANGFUSE_HOST (default http://localhost:3000, needs a port-forward),
 LANGFUSE_PUBLIC_KEY (default pk-lf-local-prototype), LANGFUSE_SECRET_KEY or LANGFUSE_INIT_PROJECT_SECRET_KEY.
 """
@@ -69,6 +74,16 @@ class Langfuse:
         r.raise_for_status()
         return r.json() if r.content else {}
 
+    def cursor_pages(self, path, **params):
+        """Cursor paging used by the v2 endpoints: keep going until the response has no cursor."""
+        cursor = None
+        while True:
+            data = self.get(path, **params, **({"cursor": cursor} if cursor else {}))
+            yield from data.get("data", [])
+            cursor = (data.get("meta") or {}).get("cursor")
+            if not cursor:
+                return
+
     def pages(self, path, **params):
         page = 1
         while True:
@@ -81,9 +96,37 @@ class Langfuse:
 
 # ---------------- quality rules (pure functions, unit-tested) ----------------
 def _text(value):
+    """Input/output as plain text. v2 returns them as raw strings, often JSON-encoded ("\\"text\\"")."""
     if value is None:
         return ""
-    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    if isinstance(value, str):
+        if value.startswith('"'):
+            try:
+                inner = json.loads(value)
+                if isinstance(inner, str):
+                    return inner
+            except ValueError:
+                pass
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _seconds_between(start, end):
+    try:
+        a = dt.datetime.fromisoformat(start.replace("Z", "+00:00"))
+        b = dt.datetime.fromisoformat(end.replace("Z", "+00:00"))
+        return (b - a).total_seconds()
+    except (AttributeError, ValueError):
+        return None
+
+
+def to_trace(row):
+    """A top-level observation row from the v2 API, shaped like the trace the scoring rules expect."""
+    latency = row.get("latency")
+    if latency is None:
+        latency = _seconds_between(row.get("startTime"), row.get("endTime"))
+    return {"id": row.get("traceId") or row.get("id"), "name": row.get("name"),
+            "input": row.get("input"), "output": row.get("output"), "latency": latency}
 
 
 def find_leaks(*texts):
@@ -97,7 +140,7 @@ def score_trace(trace, max_latency):
     output = _text(trace.get("output")).strip()
     scores = [
         ("answer_present", 1 if output and not output.startswith("FAILED") else 0,
-         "has an answer" if output and not output.startswith("FAILED") else "no answer"),
+         "has an answer" if output and not output.startswith("FAILED") else "no output recorded on the top-level step"),
         ("not_failed", 0 if output.startswith("FAILED") else 1, output[:120] if output.startswith("FAILED") else "ok"),
     ]
     latency = trace.get("latency")
@@ -132,20 +175,28 @@ def cmd_models(lf, args):
 
 
 def cmd_score(lf, args):
-    since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=args.hours)).isoformat().replace("+00:00", "Z")
-    params = {"limit": 50, "fromTimestamp": since}
+    now = dt.datetime.now(dt.timezone.utc)
+    iso = lambda t: t.isoformat(timespec="milliseconds").replace("+00:00", "Z")  # noqa: E731
+    params = {"limit": 1000, "fields": "core,basic,io",
+              "fromStartTime": iso(now - dt.timedelta(hours=args.hours)),
+              "toStartTime": iso(now + dt.timedelta(minutes=1))}
     if args.name:
         params["name"] = args.name
-    traces = list(lf.pages("/api/public/traces", **params))
-    sent = bad = 0
+    rows = [r for r in lf.cursor_pages("/api/public/v2/observations", **params) if not r.get("parentObservationId")]
+    traces = [to_trace(r) for r in rows]
+    sent = bad = shown = 0
     for t in traces:
         for req in score_requests(t, args.max_latency):
             if req["value"] == 0:
                 bad += 1
-                print(f"  BAD  {t['id'][:12]}  {req['name']:15s} {req['comment']}")
+                if shown < 20:
+                    shown += 1
+                    print(f"  BAD  {str(t['id'])[:12]}  {req['name']:15s} {req['comment']}")
             if args.apply:
                 lf.post("/api/public/scores", req)
                 sent += 1
+    if bad > shown:
+        print(f"  ... and {bad - shown} more failed check(s) not listed")
     print(f"{len(traces)} trace(s) checked, {bad} failed check(s)"
           + (f", {sent} score(s) written." if args.apply else ". Dry run: add --apply to write the scores."))
     return 0

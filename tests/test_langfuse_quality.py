@@ -76,6 +76,7 @@ def test_model_price_file_is_valid():
 class FakeLangfuse:
     def __init__(self, traces, models=()):
         self.traces, self.models, self.scores, self.auth, self.created = traces, list(models), [], set(), []
+        self.queries = []
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -90,10 +91,19 @@ class FakeLangfuse:
             def do_GET(self):
                 outer.auth.add(self.headers.get("Authorization", "")[:6])
                 url = urlparse(self.path)
-                page = int(parse_qs(url.query).get("page", ["1"])[0])
-                if url.path == "/api/public/traces":
-                    items = outer.traces[(page - 1) * 2: page * 2]          # 2 per page: exercises paging
-                    self._json({"data": items, "meta": {"page": page, "totalPages": max(1, -(-len(outer.traces) // 2))}})
+                query = parse_qs(url.query)
+                if url.path == "/api/public/v2/observations":
+                    outer.queries.append(query)
+                    start = int(query.get("cursor", ["0"])[0])
+                    rows = []
+                    for t in outer.traces:                                   # one top-level row + one child per trace
+                        rows.append({"traceId": t["id"], "name": t["name"], "parentObservationId": None,
+                                     "input": t["input"], "output": t["output"], "latency": t["latency"]})
+                        rows.append({"traceId": t["id"], "name": "child", "parentObservationId": "root",
+                                     "input": "x", "output": "mail child@leak.io", "latency": 99})
+                    page = rows[start:start + 3]                             # 3 per page: exercises cursor paging
+                    meta = {"cursor": str(start + 3)} if start + 3 < len(rows) else {}
+                    self._json({"data": page, "meta": meta})
                 elif url.path == "/api/public/models":
                     self._json({"data": [{"modelName": n} for n in outer.models], "meta": {"page": 1, "totalPages": 1}})
                 else:
@@ -138,6 +148,7 @@ def test_score_dry_run_writes_nothing_and_apply_writes_everything(env, capsys):
         fake.stop()
     assert len(fake.scores) == 6 * 4                       # paged through all 6 traces, 4 scores each
     assert "no_pii_leak" in out and "leaky"[:12] in out     # the leak was reported
+    assert all("fromStartTime" in x and "toStartTime" in x for x in fake.queries)   # v2 requires a time window
     assert fake.auth == {"Basic "}                          # authenticated with the key pair
 
 
@@ -164,3 +175,9 @@ def test_missing_secret_gives_a_clear_message(monkeypatch):
 def test_unreachable_langfuse_gives_a_clear_message(env):
     with pytest.raises(SystemExit, match="port-forward"):
         q.main(["--host", "http://127.0.0.1:1", "score"])
+
+
+def test_helpers_read_v2_rows():
+    assert q._text('"hello"') == "hello" and q._text(None) == ""
+    row = {"traceId": "T", "name": "n", "startTime": "2026-01-01T00:00:00Z", "endTime": "2026-01-01T00:00:02.5Z"}
+    assert q.to_trace(row)["latency"] == 2.5 and q.to_trace(row)["id"] == "T"
