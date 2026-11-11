@@ -72,6 +72,7 @@ def trace_run(tracer, name, user_input, user_id=None, session_id=None, tags=None
     with tracer.start_as_current_span(name) as root:
         root.set_attribute("langfuse.trace.name", name)
         root.set_attribute("langfuse.trace.input", user_input)
+        root.set_attribute("langfuse.observation.input", user_input)    # also shown on the top-level step
         if user_id:
             root.set_attribute("langfuse.user.id", user_id)
         if session_id:
@@ -81,9 +82,15 @@ def trace_run(tracer, name, user_input, user_id=None, session_id=None, tags=None
         try:
             yield root
         except Exception as error:
-            root.set_attribute("langfuse.trace.output", f"FAILED: {error}")
+            set_run_output(root, f"FAILED: {error}")
             _fail(root, error)
             raise
+
+
+def set_run_output(root, text):
+    """Record the agent's final answer on the trace (call it inside trace_run)."""
+    root.set_attribute("langfuse.trace.output", text)
+    root.set_attribute("langfuse.observation.output", text)
 
 
 @contextlib.contextmanager

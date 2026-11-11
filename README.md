@@ -6,7 +6,7 @@
 See every step an agent takes, find where it failed, and keep private data out of storage.
 
 [![CI](https://github.com/praneeth-hari/AI-Observability-Platform/actions/workflows/ci.yml/badge.svg)](https://github.com/praneeth-hari/AI-Observability-Platform/actions/workflows/ci.yml)
-![Tests](https://img.shields.io/badge/tests-150-brightgreen)
+![Tests](https://img.shields.io/badge/tests-206-brightgreen)
 ![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-OTLP-blueviolet)
 ![Langfuse](https://img.shields.io/badge/UI-Langfuse-orange)
 ![Kubernetes](https://img.shields.io/badge/deploy-Kubernetes%20%2B%20Helm-326ce5)
@@ -117,7 +117,7 @@ pip install -r tests/requirements.txt chdb
 python -m pytest        # needs Docker (or OTELCOL_BIN) and helm on PATH; takes about 4 minutes
 ```
 
-Tests cover redaction, authentication, TLS, pipeline reliability, secrets handling, retention (including real deletion in an embedded ClickHouse), backup and restore, the LangGraph agent, the Helm chart and the Argo CD application.
+Tests cover redaction, authentication, TLS, pipeline reliability, secrets handling, retention (including real deletion in an embedded ClickHouse), backup and restore, the LangGraph agent, the Helm chart and the Argo CD application, the onboarding kit, the load test and the cost and quality scripts.
 
 ## Roadmap
 
@@ -132,7 +132,7 @@ Tests cover redaction, authentication, TLS, pipeline reliability, secrets handli
 | 7 | GitOps with Argo CD (the cluster follows what is in Git automatically), plus CI/CD (continuous integration and continuous delivery), including automatic chart releases | Done |
 | 8 | Enterprise controls. Monitoring and alerts (Prometheus and Grafana): done. Automatic TLS certificates (cert-manager): done. SSO (single sign-on) with RBAC (role-based access control), and a secrets vault: planned | In progress |
 | 9 | Onboarding guide ([docs/ONBOARDING.md](docs/ONBOARDING.md)), a copy-paste template and a demo agent so any team can connect its AI agents (a Databricks example is documented but not tested) | Done |
-| 10 | Cost and quality dashboards, load test, runbook (what to do when something breaks) and handover | Planned |
+| 10 | Cost and quality views in Langfuse, load test, runbook (what to do when something breaks), handover document and demo script | Done |
 
 ### Glossary
 
@@ -163,27 +163,35 @@ Tests cover redaction, authentication, TLS, pipeline reliability, secrets handli
 Stated plainly, so nobody is surprised:
 
 - **Prototype scale.** Databases run as single instances; high availability, multi-region and managed databases are not covered yet.
-- **Development certificates.** The TLS certificate comes from a private dev CA; cert-manager or a company CA is planned (Step 8).
+- **Private certificate authority.** cert-manager issues the collector certificate from a small private CA; for a real domain use your company CA or a public one.
 - **In-memory queue.** Spans waiting in the collector's queue are lost if the collector is killed mid-send.
 - **MinIO image is not pinned** (Chainguard publishes only `latest`); pin by digest before production.
 - **Backups pause ingestion** for about a minute and do not include `.env`.
-- **Databricks onboarding** (Step 9) is not done yet.
+- **Databricks not tested.** The onboarding kit works for any agent, but no live Databricks agent has been tested.
+- **Not built yet:** single sign-on and role-based access, a secrets vault, alert notifications (Alertmanager), and automated backups on Kubernetes. See [docs/HANDOVER.md](docs/HANDOVER.md).
 
 ## Repository layout
 
 ```
 agent/                         Sample agent (agent.py) and LangGraph agent (langgraph_agent.py)
+onboarding/                    Copy-paste template and demo agent for other teams
 collector/config.yaml          Collector pipeline: auth, TLS, redaction, batching, export
 docker-compose.yml             Local stack: collector + Langfuse + Postgres, ClickHouse, Redis, MinIO
 deploy/helm/ai-observability/  Helm chart for Kubernetes
 deploy/argocd/                 Argo CD application (GitOps)
 deploy/kind/                   Local Kubernetes test cluster config
-scripts/                       make_certs, secrets_tool, retention, backup, k8s_secrets
-tests/                         150 automated tests
+deploy/langfuse/               Model price list for cost tracking
+scripts/                       make_certs, secrets_tool, retention, backup, k8s_secrets, load_test, langfuse_quality
+tests/                         206 automated tests
 docs/STEPS.md                  Detailed build log for every step
 ```
 
 ## Documentation
 
 - [docs/STEPS.md](docs/STEPS.md): step-by-step build log with commands and expected results.
+- [docs/RUNBOOK.md](docs/RUNBOOK.md): what to do when an alert fires or something breaks.
+- [docs/ONBOARDING.md](docs/ONBOARDING.md): how another team connects its AI agent.
+- [docs/DASHBOARDS.md](docs/DASHBOARDS.md): platform health, cost and quality views.
+- [docs/DEMO.md](docs/DEMO.md): a 15-minute demo script.
+- [docs/HANDOVER.md](docs/HANDOVER.md): what exists, what is proven, what is missing, what to decide next.
 - The product concept (problem, approach, MVP acceptance criteria) is in the *Enterprise AI Observability Product Prototype* document this project implements.

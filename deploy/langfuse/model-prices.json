@@ -1,0 +1,8 @@
+{
+  "_note": "Prices are USD per token. Local models cost nothing. 'fake-llm' is the demo model of the onboarding agent: its price is a DEMO value so cost shows up in the dashboards. Replace with your real provider prices before using for money decisions.",
+  "models": [
+    {"modelName": "fake-llm", "matchPattern": "(?i)^fake-llm$", "unit": "TOKENS", "inputPrice": 0.000001, "outputPrice": 0.000002},
+    {"modelName": "mock-llm", "matchPattern": "(?i)^mock-llm$", "unit": "TOKENS", "inputPrice": 0, "outputPrice": 0},
+    {"modelName": "local-ollama-models", "matchPattern": "(?i)^(qwen2\\.5|llama3\\.1)(:.*)?$", "unit": "TOKENS", "inputPrice": 0, "outputPrice": 0}
+  ]
+}

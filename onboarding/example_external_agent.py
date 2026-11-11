@@ -17,7 +17,7 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from otel_setup import (llm_call, record_llm_result, record_tool_result,  # noqa: E402
-                        setup_tracing, tool_call, trace_run)
+                        set_run_output, setup_tracing, tool_call, trace_run)
 
 ORDERS = {"1042": "shipped on 2026-11-08, arrives 2026-11-12", "2077": "being packed", "3310": "delivered"}
 PII_QUESTION = "I am jane.roe@example.com, phone +91 98765 43210. Where is order 1042?"
@@ -49,7 +49,7 @@ def run(tracer, question):
         with llm_call(tracer, "llm.answer", "fake-llm", "demo", messages) as span:
             text, in_tokens, out_tokens = fake_llm(messages)
             record_llm_result(span, text, in_tokens, out_tokens)
-        root.set_attribute("langfuse.trace.output", text)
+        set_run_output(root, text)
         return text, format(root.get_span_context().trace_id, "032x")
 
 

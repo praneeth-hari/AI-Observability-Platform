@@ -57,6 +57,8 @@ def test_an_agent_run_produces_a_trace_with_tool_and_llm_spans(memory):
     assert spans["llm.answer"].parent.span_id == root.context.span_id
     assert root.attributes["langfuse.trace.input"] == "Where is order 1042?"
     assert root.attributes["langfuse.trace.output"] == answer
+    assert root.attributes["langfuse.observation.input"] == "Where is order 1042?"
+    assert root.attributes["langfuse.observation.output"] == answer
 
 
 def test_llm_span_carries_model_and_token_counts(memory):
@@ -75,6 +77,7 @@ def test_a_failing_tool_marks_the_trace_as_an_error(memory):
     spans = by_name(exporter)
     assert spans["order_lookup"].attributes["langfuse.observation.level"] == "ERROR"
     assert spans["order-support-agent"].attributes["langfuse.trace.output"].startswith("FAILED")
+    assert spans["order-support-agent"].attributes["langfuse.observation.output"].startswith("FAILED")
 
 
 @pytest.mark.parametrize("env,message", [

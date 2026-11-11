@@ -56,7 +56,8 @@ export AGENT_CA_CERT="/path/to/k8s-ca.crt"
 Copy `onboarding/otel_setup.py` into your project. Then:
 
 ```python
-from otel_setup import setup_tracing, trace_run, llm_call, record_llm_result, tool_call, record_tool_result
+from otel_setup import (setup_tracing, trace_run, set_run_output, llm_call, record_llm_result,
+                        tool_call, record_tool_result)
 
 provider, tracer = setup_tracing("my-agent", team="my-team", platform="databricks")  # or "laptop", "aws"...
 
@@ -69,7 +70,7 @@ with trace_run(tracer, "my-agent-run", user_input=question, user_id="user-123") 
         text, in_tokens, out_tokens = call_my_model(messages)
         record_llm_result(span, text, in_tokens, out_tokens)
 
-    root.set_attribute("langfuse.trace.output", text)
+    set_run_output(root, text)
 
 provider.shutdown()   # IMPORTANT: sends the last spans before the program ends
 ```
