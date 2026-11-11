@@ -6,7 +6,7 @@
 See every step an agent takes, find where it failed, and keep private data out of storage.
 
 [![CI](https://github.com/praneeth-hari/AI-Observability-Platform/actions/workflows/ci.yml/badge.svg)](https://github.com/praneeth-hari/AI-Observability-Platform/actions/workflows/ci.yml)
-![Tests](https://img.shields.io/badge/tests-206-brightgreen)
+![Tests](https://img.shields.io/badge/tests-208-brightgreen)
 ![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-OTLP-blueviolet)
 ![Langfuse](https://img.shields.io/badge/UI-Langfuse-orange)
 ![Kubernetes](https://img.shields.io/badge/deploy-Kubernetes%20%2B%20Helm-326ce5)
@@ -108,7 +108,7 @@ kubectl port-forward -n ai-obs svc/ai-observability-collector 4318:4318        #
 | Backup and recovery | Checksummed cold backups; restore needs an intact backup, matching secrets and `--yes` | backup tests and a live restore drill |
 | Least privilege on Kubernetes | Collector runs non-root with a read-only filesystem; databases reachable only from Langfuse | chart tests |
 
-## Quality: 150 automated tests
+## Quality: 208 automated tests
 
 Every push runs the full suite in GitHub Actions against a **real OpenTelemetry Collector**, with a fake Langfuse backend that records exactly what would be stored.
 
@@ -130,7 +130,7 @@ Tests cover redaction, authentication, TLS, pipeline reliability, secrets handli
 | 5 | Security basics: API key for agents, TLS encryption, protected secrets, data retention (automatic deletion of old data) and backups | Done |
 | 6 | Run on Kubernetes, packaged with Helm so it installs the same way everywhere | Done |
 | 7 | GitOps with Argo CD (the cluster follows what is in Git automatically), plus CI/CD (continuous integration and continuous delivery), including automatic chart releases | Done |
-| 8 | Enterprise controls. Monitoring and alerts (Prometheus and Grafana): done. Automatic TLS certificates (cert-manager): done. SSO (single sign-on) with RBAC (role-based access control), and a secrets vault: planned | In progress |
+| 8 | Enterprise controls. Monitoring and alerts (Prometheus and Grafana): done. Automatic TLS certificates (cert-manager): done. SSO (single sign-on) with RBAC (role-based access control), and a secrets vault: planned | Mostly done |
 | 9 | Onboarding guide ([docs/ONBOARDING.md](docs/ONBOARDING.md)), a copy-paste template and a demo agent so any team can connect its AI agents (a Databricks example is documented but not tested) | Done |
 | 10 | Cost and quality views in Langfuse, load test, runbook (what to do when something breaks), handover document and demo script | Done |
 
@@ -163,7 +163,7 @@ Tests cover redaction, authentication, TLS, pipeline reliability, secrets handli
 Stated plainly, so nobody is surprised:
 
 - **Prototype scale.** Databases run as single instances; high availability, multi-region and managed databases are not covered yet.
-- **Private certificate authority.** cert-manager issues the collector certificate from a small private CA; for a real domain use your company CA or a public one.
+- **Private certificate authority.** The collector certificate is issued and renewed automatically by cert-manager from a private dev CA; a company CA (or a public one) is needed for production.
 - **In-memory queue.** Spans waiting in the collector's queue are lost if the collector is killed mid-send.
 - **MinIO image is not pinned** (Chainguard publishes only `latest`); pin by digest before production.
 - **Backups pause ingestion** for about a minute and do not include `.env`.
@@ -182,7 +182,7 @@ deploy/argocd/                 Argo CD application (GitOps)
 deploy/kind/                   Local Kubernetes test cluster config
 deploy/langfuse/               Model price list for cost tracking
 scripts/                       make_certs, secrets_tool, retention, backup, k8s_secrets, load_test, langfuse_quality
-tests/                         206 automated tests
+tests/                         208 automated tests
 docs/STEPS.md                  Detailed build log for every step
 ```
 
